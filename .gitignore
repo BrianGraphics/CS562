@@ -19,3 +19,6 @@ Makefile
 #rply // Don't know what this is
 rply.c
 rply.h
+
+#template
+commit_template.txt
