@@ -1,0 +1,21 @@
+#library
+libs
+
+#assets
+skys
+textures
+
+#vs files
+.vs
+Debug
+Release
+
+#Makefile
+Makefile
+
+#imgui
+*.ini
+
+#rply // Don't know what this is
+rply.c
+rply.h
