@@ -46,7 +46,8 @@ public:
     float lightSpin, lightTilt, lightDist;
     glm::vec3 lightPos;
     // @@ Perhaps declare additional scene lighting values here. (lightVal, lightAmb)
-    
+    glm::vec3 lightVal;
+    glm::vec3 lightAmb;
 
 
     bool drawReflective;
@@ -74,16 +75,27 @@ public:
     Object *central, *anim, *room, *floor, *teapot, *podium, *sky,
             *ground, *sea, *spheres, *leftFrame, *rightFrame;
 
+    Object* lightsRoot;
+    Object* localLight1, *localLight2, *localLight3;
+
     std::vector<Object*> animated;
     ProceduralGround* proceduralground;
 
     // Shader programs
+    ShaderProgram* gbufferProgram;
     ShaderProgram* lightingProgram;
-    // @@ Declare additional shaders if necessary
+    ShaderProgram* localLightsProgram;
 
 
     // Options menu stuff
     bool show_demo_window;
+
+    // fbos
+    FBO* G_Buffer;
+    int drawID;
+    int flipToggle;
+    Shape* screen;
+    bool debugToggle;
 
     void InitializeScene();
     void BuildTransforms();

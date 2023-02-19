@@ -30,6 +30,10 @@ class Object
     int objectId;               // Object id to be sent to the shader
     bool drawMe;                // Toggle specifies if this object (and children) are drawn.
 
+    bool isLight;
+    glm::vec3 position;
+    float range;
+
     glm::vec3 diffuseColor;          // Diffuse color of object
     glm::vec3 specularColor;         // Specular color of object
     float shininess;            // Surface roughness value

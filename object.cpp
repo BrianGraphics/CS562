@@ -28,14 +28,12 @@ using namespace gl;
 #include <glu.h>                // For gluErrorString
 #define CHECKERROR {GLenum err = glGetError(); if (err != GL_NO_ERROR) { fprintf(stderr, "OpenGL error (at line object.cpp:%d): %s\n", __LINE__, gluErrorString(err)); exit(-1);} }
 
-
 Object::Object(Shape* _shape, const int _objectId,
                const glm::vec3 _diffuseColor, const glm::vec3 _specularColor, const float _shininess)
     : diffuseColor(_diffuseColor), specularColor(_specularColor), shininess(_shininess),
       shape(_shape), objectId(_objectId), drawMe(true)
      
 {}
-
 
 void Object::Draw(ShaderProgram* program, glm::mat4& objectTr)
 {
@@ -75,8 +73,21 @@ void Object::Draw(ShaderProgram* program, glm::mat4& objectTr)
     // If this object has an associated texture, this is the place to
     // load the texture into a texture-unit of your choice and inform
     // the shader program of the texture-unit number.  See
-    // Texture::Bind for the 4 lines of code to do exactly that.
-    
+    // Texture::Bind for the 4 lines of code to do exactly that.   
+
+    // Uniforms for local lights
+    if (isLight) {
+        loc = glGetUniformLocation(program->programId, "isLight");
+        glUniform1i(loc, isLight);
+        loc = glGetUniformLocation(program->programId, "lightPos");
+        glUniform3fv(loc, 1, &(position[0]));
+        loc = glGetUniformLocation(program->programId, "lightVal");
+        glUniform3fv(loc, 1, &(diffuseColor[0]));
+        loc = glGetUniformLocation(program->programId, "lightAmb");
+        glUniform3fv(loc, 1, &(specularColor[0]));
+        loc = glGetUniformLocation(program->programId, "lightRange");
+        glUniform1f(loc, range);
+    }
 
     // Draw this object
     CHECKERROR;
