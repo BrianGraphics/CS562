@@ -768,3 +768,20 @@ Quad::Quad(const int n)
     vaoID = VaoFromTris(Pnt, Nrm, Tex, Tan, Tri);
     count = Tri.size();
 }
+
+Screen::Screen()
+{
+    diffuseColor  = glm::vec3(0.0);
+    specularColor = glm::vec3(0.0);
+    shininess     = 1.0;
+
+    Pnt.push_back(glm::vec4( 1.0,  1.0, 0.0, 0.0));
+    Pnt.push_back(glm::vec4( 1.0, -1.0, 0.0, 0.0));
+    Pnt.push_back(glm::vec4(-1.0, -1.0, 0.0, 0.0));
+    Pnt.push_back(glm::vec4(-1.0,  1.0, 0.0, 0.0));
+
+    pushquad(Tri, 1, 0, 3, 2);
+
+    ComputeSize();
+    MakeVAO();
+}

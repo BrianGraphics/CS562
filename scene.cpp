@@ -125,9 +125,6 @@ Object* FramedPicture(const glm::mat4& modelTr, const int objectId,
 // number of other parameters.
 void Scene::InitializeScene()
 {
-    glEnable(GL_DEPTH_TEST);
-    CHECKERROR;
-
     // @@ Initialize interactive viewing variables here. (spin, tilt, ry, front back, ...)
     
     // Set initial light parameters
@@ -135,7 +132,9 @@ void Scene::InitializeScene()
     lightTilt = -45.0;
     lightDist = 100.0;
     // @@ Perhaps initialize additional scene lighting values here. (lightVal, lightAmb)
-    
+    lightVal = glm::vec3(3,     3,   3);
+    lightAmb = glm::vec3(0.1, 0.1, 0.1);
+
     key = 0;
     nav = false;
     spin = 0.0;
@@ -152,21 +151,38 @@ void Scene::InitializeScene()
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
 
-    
-    // Enable OpenGL depth-testing
-    glEnable(GL_DEPTH_TEST);
-
     // Create the lighting shader program from source code files.
     // @@ Initialize additional shaders if necessary
+    gbufferProgram = new ShaderProgram();
+    gbufferProgram->AddShader("shaders\\GBuffer.vert", GL_VERTEX_SHADER);
+    gbufferProgram->AddShader("shaders\\GBuffer.frag", GL_FRAGMENT_SHADER);
+
+    glBindAttribLocation(gbufferProgram->programId, 0, "vertex");
+    glBindAttribLocation(gbufferProgram->programId, 1, "vertexNormal");
+    glBindAttribLocation(gbufferProgram->programId, 2, "vertexTexture");
+    glBindAttribLocation(gbufferProgram->programId, 3, "vertexTangent");
+    gbufferProgram->LinkProgram();
+
     lightingProgram = new ShaderProgram();
-    lightingProgram->AddShader("lightingPhong.vert", GL_VERTEX_SHADER);
-    lightingProgram->AddShader("lightingPhong.frag", GL_FRAGMENT_SHADER);
+    lightingProgram->AddShader("shaders\\Lighting.vert", GL_VERTEX_SHADER);
+    lightingProgram->AddShader("shaders\\Lighting.frag", GL_FRAGMENT_SHADER);
+    lightingProgram->AddShader("shaders\\BRDF.vert",     GL_VERTEX_SHADER);
+    lightingProgram->AddShader("shaders\\BRDF.frag",     GL_FRAGMENT_SHADER);
+    
 
     glBindAttribLocation(lightingProgram->programId, 0, "vertex");
-    glBindAttribLocation(lightingProgram->programId, 1, "vertexNormal");
-    glBindAttribLocation(lightingProgram->programId, 2, "vertexTexture");
-    glBindAttribLocation(lightingProgram->programId, 3, "vertexTangent");
     lightingProgram->LinkProgram();
+
+    localLightsProgram = new ShaderProgram();
+    localLightsProgram->AddShader("shaders\\LocalLights.vert", GL_VERTEX_SHADER);
+    localLightsProgram->AddShader("shaders\\LocalLights.frag", GL_FRAGMENT_SHADER);
+    localLightsProgram->AddShader("shaders\\BRDF.vert",        GL_VERTEX_SHADER);
+    localLightsProgram->AddShader("shaders\\BRDF.frag",        GL_FRAGMENT_SHADER);
+
+    glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
+    glBindAttribLocation(localLightsProgram->programId, 1, "vertexNormal");
+    localLightsProgram->LinkProgram();
+
 
 
     
@@ -220,7 +236,21 @@ void Scene::InitializeScene()
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons);
     rightFrame = FramedPicture(Identity, rPicId, BoxPolygons, QuadPolygons); 
     spheres    = SphereOfSpheres(SpherePolygons);
-#ifdef REFL
+
+    lightsRoot = new Object(NULL, nullId);
+    localLight1 = new Object(SpherePolygons, nullId, glm::vec3(24.0, 0.0, 0.0), lightAmb, 1);
+    localLight1->position = glm::vec3(-2.0, 0.0, 2.0);
+    localLight1->range = 4.0;
+
+    localLight2 = new Object(SpherePolygons, nullId, glm::vec3(64.0, 64.0, 64.0), lightAmb, 1);
+    localLight2->position = glm::vec3(0.1, 0.0, 5.0);
+    localLight2->range = 6.0;
+
+    localLight3 = new Object(SpherePolygons, nullId, glm::vec3(0.0, 0.0, 16.0), lightAmb, 1);
+    localLight3->position = glm::vec3(2.0, 0.0, 2.0);
+    localLight3->range = 4.0;
+
+#if REFL
     spheres->drawMe = true;
 #else
     spheres->drawMe = false;
@@ -258,10 +288,30 @@ void Scene::InitializeScene()
         room->add(leftFrame, Translate(-1.5, 9.85, 1.)*Scale(0.8, 0.8, 0.8));
         room->add(rightFrame, Translate( 1.5, 9.85, 1.)*Scale(0.8, 0.8, 0.8)); }
 
+
+    lightsRoot->add(localLight1, Translate(localLight1->position.x, localLight1->position.y, localLight1->position.z)
+                                 * Scale(localLight1->range, localLight1->range, localLight1->range));
+    lightsRoot->add(localLight2, Translate(localLight2->position.x, localLight2->position.y, localLight2->position.z)
+                                 * Scale(localLight2->range, localLight2->range, localLight2->range));
+    lightsRoot->add(localLight3, Translate(localLight3->position.x, localLight3->position.y, localLight3->position.z)
+                                 * Scale(localLight3->range, localLight3->range, localLight3->range));
     CHECKERROR;
 
     // Options menu stuff
     show_demo_window = false;
+
+    // FBO setup
+    G_Buffer = new FBO();
+
+    glfwGetFramebufferSize(window, &width, &height);
+    G_Buffer->CreateGBuffer(width, height);
+    CHECKERROR;
+
+    drawID     = 0;
+    flipToggle = 0;
+    debugToggle = false;
+    screen = new Screen();
+    
 }
 
 void Scene::DrawMenu()
@@ -283,11 +333,19 @@ void Scene::DrawMenu()
         // among a set of choices.  The current choice is stored in a
         // variable named "mode" in the application, and sent to the
         // shader to be used as you wish.
+        
         if (ImGui::BeginMenu("Menu ")) {
             if (ImGui::MenuItem("<sample menu of choices>", "",	false, false)) {}
             if (ImGui::MenuItem("Do nothing 0", "",		mode==0)) { mode=0; }
             if (ImGui::MenuItem("Do nothing 1", "",		mode==1)) { mode=1; }
             if (ImGui::MenuItem("Do nothing 2", "",		mode==2)) { mode=2; }
+            ImGui::SliderInt("Switch", &drawID, 0, 4);
+            ImGui::SliderInt("Toggle", &flipToggle, 0, 2);
+
+            ImGui::Checkbox("Local light1", &(localLight1->drawMe));
+            ImGui::Checkbox("Local light2", &(localLight2->drawMe));
+            ImGui::Checkbox("Local light3", &(localLight3->drawMe));       
+            ImGui::Checkbox("Show Range", &debugToggle);       
             ImGui::EndMenu(); }
         
         ImGui::EndMainMenuBar(); }
@@ -353,63 +411,173 @@ void Scene::DrawScene()
 
     // The lighting algorithm needs the inverse of the WorldView matrix
     WorldInverse = glm::inverse(WorldView);
-    
-
-    ////////////////////////////////////////////////////////////////////////////////
-    // Anatomy of a pass:
-    //   Choose a shader  (create the shader in InitializeScene above)
-    //   Choose and FBO/Render-Target (if needed; create the FBO in InitializeScene above)
-    //   Set the viewport (to the pixel size of the screen or FBO)
-    //   Clear the screen.
-    //   Set the uniform variables required by the shader
-    //   Draw the geometry
-    //   Unset the FBO (if one was used)
-    //   Unset the shader
-    ////////////////////////////////////////////////////////////////////////////////
 
     CHECKERROR;
     int loc, programId;
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // Lighting pass
-    ////////////////////////////////////////////////////////////////////////////////
-    
-    // Choose the lighting shader
-    lightingProgram->UseShader();
-    programId = lightingProgram->programId;
+    ///////////////////
+    // G-Buffer pass //
+    ///////////////////
+
+    // Enable & Disable
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);    
+    CHECKERROR;
+
+    // Choose the shader
+    gbufferProgram->UseShader();
+    programId = gbufferProgram->programId;
+
+    // bind FBO
+    G_Buffer->BindFBO();
+    CHECKERROR;
 
     // Set the viewport, and clear the screen
     glViewport(0, 0, width, height);
     glClearColor(0.5, 0.5, 0.5, 1.0);
     glClear(GL_COLOR_BUFFER_BIT| GL_DEPTH_BUFFER_BIT);
 
-
-    // @@ The scene specific parameters (uniform variables) used by
-    // the shader are set here.  Object specific parameters are set in
-    // the Draw procedure in object.cpp
-    
+    // Uniforms
     loc = glGetUniformLocation(programId, "WorldProj");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
     loc = glGetUniformLocation(programId, "WorldView");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
     loc = glGetUniformLocation(programId, "WorldInverse");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    loc = glGetUniformLocation(programId, "lightPos");
-    glUniform3fv(loc, 1, &(lightPos[0]));   
-    loc = glGetUniformLocation(programId, "mode");
-    glUniform1i(loc, mode);
     CHECKERROR;
 
-    // Draw all objects (This recursively traverses the object hierarchy.)
-    CHECKERROR;
-    objectRoot->Draw(lightingProgram, Identity);
+    // Draw all objects
+    objectRoot->Draw(gbufferProgram, Identity);
     CHECKERROR; 
 
+
+    // unbind FBO
+    G_Buffer->UnbindFBO();
     
+    // Turn off the shader
+    gbufferProgram->UnuseShader();
+
+    ///////////////////
+    // Lighting pass //
+    ///////////////////
+
+    // Enable & Disable
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);    
+    glCullFace(GL_BACK);
+    CHECKERROR;
+
+    // Choose Shader
+    lightingProgram->UseShader();
+    programId = lightingProgram->programId;
+
+    // Set the viewport, and clear the screen
+    glViewport(0, 0, width, height);
+    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    CHECKERROR;
+
+    // bind texture
+    G_Buffer->BindTexture(0, programId, "g_buffer_world_pos");
+    G_Buffer->BindTexture(1, programId, "g_buffer_world_norm");
+    G_Buffer->BindTexture(2, programId, "g_buffer_diffuse_color");
+    G_Buffer->BindTexture(3, programId, "g_buffer_specular_color");
+    CHECKERROR;
+
+    // for BRDF
+    loc = glGetUniformLocation(programId, "WorldInverse");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+    loc = glGetUniformLocation(programId, "lightPos");
+    glUniform3fv(loc, 1, &(lightPos[0]));
+    loc = glGetUniformLocation(programId, "lightVal");
+    glUniform3fv(loc, 1, &(lightVal[0]));
+    loc = glGetUniformLocation(programId, "lightAmb");
+    glUniform3fv(loc, 1, &(lightAmb[0]));
+
+    // for final output
+    loc = glGetUniformLocation(programId, "width");
+    glUniform1ui(loc, width);
+    loc = glGetUniformLocation(programId, "height");
+    glUniform1ui(loc, height);
+    loc = glGetUniformLocation(programId, "ID");
+    glUniform1i(loc, drawID);
+    loc = glGetUniformLocation(programId, "Toggle");
+    glUniform1i(loc, flipToggle);
+    CHECKERROR;
+
+    screen->DrawVAO();
+    CHECKERROR;
+
+    // unbind textures
+    G_Buffer->UnbindTexture(0);
+    G_Buffer->UnbindTexture(1);
+    G_Buffer->UnbindTexture(2);
+    G_Buffer->UnbindTexture(3);
+    CHECKERROR;
+
     // Turn off the shader
     lightingProgram->UnuseShader();
 
-    ////////////////////////////////////////////////////////////////////////////////
-    // End of Lighting pass
-    ////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////
+    // Local Lights pass //
+    ///////////////////////
+
+    // Enable & Disable
+    glDisable(GL_DEPTH_TEST);    
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+
+    // Choose Shader
+    localLightsProgram->UseShader();
+    programId = localLightsProgram->programId;
+
+    // bind texture
+    G_Buffer->BindTexture(0, programId, "g_buffer_world_pos");
+    G_Buffer->BindTexture(1, programId, "g_buffer_world_norm");
+    G_Buffer->BindTexture(2, programId, "g_buffer_diffuse_color");
+    G_Buffer->BindTexture(3, programId, "g_buffer_specular_color");
+    CHECKERROR;
+
+    // Set the viewport
+    glViewport(0, 0, width, height);
+    CHECKERROR;
+
+    loc = glGetUniformLocation(programId, "WorldProj");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
+    loc = glGetUniformLocation(programId, "WorldView");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
+    CHECKERROR;
+
+    // For BRDF
+    loc = glGetUniformLocation(programId, "WorldInverse");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+    CHECKERROR;
+
+    loc = glGetUniformLocation(programId, "width");
+    glUniform1ui(loc, width);
+    loc = glGetUniformLocation(programId, "height");
+    glUniform1ui(loc, height);
+    CHECKERROR;
+
+    loc = glGetUniformLocation(programId, "debugLocalLight");
+    glUniform1i(loc, debugToggle);
+    CHECKERROR;
+
+    lightsRoot->Draw(localLightsProgram, Identity);
+    CHECKERROR;
+
+    // unbind textures
+    G_Buffer->UnbindTexture(0);
+    G_Buffer->UnbindTexture(1);
+    G_Buffer->UnbindTexture(2);
+    G_Buffer->UnbindTexture(3);
+    CHECKERROR;
+
+    // Turn off the shader
+    localLightsProgram->UnuseShader();
 }

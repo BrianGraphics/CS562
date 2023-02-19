@@ -10,10 +10,21 @@ class FBO {
 public:
     unsigned int fboID;
     unsigned int textureID;
+    unsigned int currID;
+
+    // 4 IDs
+    unsigned int posID;
+    unsigned int normalID;
+    unsigned int diffuseID;
+    unsigned int specularID;
+
     int width, height;  // Size of the texture.
 
     void CreateFBO(const int w, const int h);
     
+    // G-Buffer
+    void CreateGBuffer(const int w, const int h);
+
     // Bind this FBO to receive the output of the graphics pipeline.
     void BindFBO();
     

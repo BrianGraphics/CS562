@@ -136,4 +136,10 @@ public:
     static int face_cb(p_ply_argument argument);
 };
 
+class Screen : public Shape
+{
+public:
+    Screen();
+};
+
 #endif
