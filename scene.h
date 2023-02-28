@@ -16,6 +16,7 @@
 #include "object.h"
 #include "texture.h"
 #include "fbo.h"
+#include "ComputeShader.h"
 
 enum ObjectIds {
     nullId	= 0,
@@ -85,6 +86,8 @@ public:
     ShaderProgram* gbufferProgram;
     ShaderProgram* lightingProgram;
     ShaderProgram* localLightsProgram;
+    ShaderProgram* shadowProgram;
+    ShaderProgram* computeProgram_v, *computeProgram_h;
 
 
     // Options menu stuff
@@ -96,6 +99,18 @@ public:
     int flipToggle;
     Shape* screen;
     bool debugToggle;
+
+    // shadow 
+    glm::vec3 lookAtPos;
+    glm::mat4 ShadowMatrix;
+    FBO* shadowFBO;
+    ComputeShader* computeShader_v;
+    ComputeShader* computeShader_h;
+    int blur_size;
+    std::vector<float> weights;
+    FBO* vFBO, *hFBO;
+    glm::vec3 centerPos;
+    float centerRadius;
 
     void InitializeScene();
     void BuildTransforms();

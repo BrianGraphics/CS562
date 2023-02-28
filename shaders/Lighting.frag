@@ -1,6 +1,3 @@
-/////////////////////////////////////////////////////////////////////////
-// Pixel shader for lighting
-////////////////////////////////////////////////////////////////////////
 #version 330
 
 out vec4 FragColor;
@@ -47,6 +44,6 @@ void main()
         FragColor = Ks_d;
         return;
     }
- 
-    FragColor.xyz = BRDF(WorldPos_d.xyz, Normal_d.xyz, Kd_d.xyz, Ks_d.xyz, Ks_d.w);
+       
+    FragColor.xyz = BRDF(WorldPos_d.xyz, Normal_d.xyz, Kd_d.xyz, Ks_d.xyz, Ks_d.w);            
 }

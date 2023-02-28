@@ -1,6 +1,3 @@
-/////////////////////////////////////////////////////////////////////////
-// Pixel shader for lighting
-////////////////////////////////////////////////////////////////////////
 #version 330
 
 out vec4 FragColor;
@@ -48,12 +45,12 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
         float attenuation = (1.0 / (dist * dist)  - 1.0 / (lightRange * lightRange));
         Ii *= attenuation;
       }
-      /*else {
+      else {
         if(debugLocalLight) 
           return Ii;
         else
           return vec3(0.0);
-      }*/
+      }
     }
     
     N = normalize(N);

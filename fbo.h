@@ -20,7 +20,7 @@ public:
 
     int width, height;  // Size of the texture.
 
-    void CreateFBO(const int w, const int h);
+    void CreateFBO(const int w, const int h, const int unit);
     
     // G-Buffer
     void CreateGBuffer(const int w, const int h);

@@ -25,11 +25,11 @@ int main(int argc, char** argv)
     if (!glfwInit())  exit(EXIT_FAILURE);
 
     glfwWindowHint(GLFW_RESIZABLE, 1);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, 0);
-    scene.window = glfwCreateWindow(750,750, "Graphics Framework", NULL, NULL);
+    scene.window = glfwCreateWindow(768, 768, "Graphics Framework", NULL, NULL);
     if (!scene.window)  { glfwTerminate();  exit(-1); }
 
     glfwMakeContextCurrent(scene.window);

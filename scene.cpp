@@ -148,6 +148,10 @@ void Scene::InitializeScene()
     front = 0.5;
     back = 5000.0;
 
+    centerPos.z  = -30.0f;
+    centerRadius = 100.0f;
+    weights.assign(101, 0);
+
     CHECKERROR;
     objectRoot = new Object(NULL, nullId);
 
@@ -166,8 +170,8 @@ void Scene::InitializeScene()
     lightingProgram = new ShaderProgram();
     lightingProgram->AddShader("shaders\\Lighting.vert", GL_VERTEX_SHADER);
     lightingProgram->AddShader("shaders\\Lighting.frag", GL_FRAGMENT_SHADER);
-    lightingProgram->AddShader("shaders\\BRDF.vert",     GL_VERTEX_SHADER);
-    lightingProgram->AddShader("shaders\\BRDF.frag",     GL_FRAGMENT_SHADER);
+    lightingProgram->AddShader("shaders\\BRDF_global.vert", GL_VERTEX_SHADER);
+    lightingProgram->AddShader("shaders\\BRDF_global.frag", GL_FRAGMENT_SHADER);
     
 
     glBindAttribLocation(lightingProgram->programId, 0, "vertex");
@@ -176,12 +180,33 @@ void Scene::InitializeScene()
     localLightsProgram = new ShaderProgram();
     localLightsProgram->AddShader("shaders\\LocalLights.vert", GL_VERTEX_SHADER);
     localLightsProgram->AddShader("shaders\\LocalLights.frag", GL_FRAGMENT_SHADER);
-    localLightsProgram->AddShader("shaders\\BRDF.vert",        GL_VERTEX_SHADER);
-    localLightsProgram->AddShader("shaders\\BRDF.frag",        GL_FRAGMENT_SHADER);
+    localLightsProgram->AddShader("shaders\\BRDF_local.vert",  GL_VERTEX_SHADER);
+    localLightsProgram->AddShader("shaders\\BRDF_local.frag",  GL_FRAGMENT_SHADER);
 
     glBindAttribLocation(localLightsProgram->programId, 0, "vertex");
     glBindAttribLocation(localLightsProgram->programId, 1, "vertexNormal");
     localLightsProgram->LinkProgram();
+
+    shadowProgram = new ShaderProgram();
+    shadowProgram->AddShader("shaders\\shadow.vert", GL_VERTEX_SHADER);
+    shadowProgram->AddShader("shaders\\shadow.frag", GL_FRAGMENT_SHADER);
+
+    glBindAttribLocation(shadowProgram->programId, 0, "vertex");
+    shadowProgram->LinkProgram();
+
+    computeProgram_v = new ShaderProgram();
+    computeProgram_v->AddShader("shaders\\convolution_v.comp", GL_COMPUTE_SHADER);
+    computeProgram_v->LinkProgram();
+
+    computeShader_v = new ComputeShader();
+    computeShader_v->SetShader(computeProgram_v);
+
+    computeProgram_h = new ShaderProgram();
+    computeProgram_h->AddShader("shaders\\convolution_h.comp", GL_COMPUTE_SHADER);
+    computeProgram_h->LinkProgram();
+
+    computeShader_h = new ComputeShader();
+    computeShader_h->SetShader(computeProgram_h);
 
 
 
@@ -226,13 +251,13 @@ void Scene::InitializeScene()
     
     central    = new Object(NULL, nullId);
     anim       = new Object(NULL, nullId);
-    room       = new Object(RoomPolygons, roomId, brickColor, black, 1);
+    room = new Object(RoomPolygons, roomId, brickColor, black, 1); room->drawMe = false;
     floor      = new Object(FloorPolygons, floorId, floorColor, black, 1);
     teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120);
     podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), polishedSpec, 10); 
     sky        = new Object(SpherePolygons, skyId, black, black, 0);
-    ground     = new Object(GroundPolygons, groundId, grassColor, black, 1);
-    sea        = new Object(SeaPolygons, seaId, waterColor, brightSpec, 120);
+    ground = new Object(GroundPolygons, groundId, grassColor, black, 1);
+    sea = new Object(SeaPolygons, seaId, waterColor, brightSpec, 120);
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons);
     rightFrame = FramedPicture(Identity, rPicId, BoxPolygons, QuadPolygons); 
     spheres    = SphereOfSpheres(SpherePolygons);
@@ -277,9 +302,9 @@ void Scene::InitializeScene()
     animated.push_back(anim);
 
     // Central contains a teapot on a podium and an external sphere of spheres
-    central->add(podium, Translate(0.0, 0,0));
+    //central->add(podium, Translate(0.0, 0,0));
     central->add(anim, Translate(0.0, 0,0));
-    anim->add(teapot, Translate(0.1, 0.0, 1.5)*TeapotPolygons->modelTr);
+    anim->add(teapot, Translate(0.0, 0.0, 1.5)*Scale(3.0, 3.0, 3.0) * TeapotPolygons->modelTr);
     if (fullPolyCount)
         anim->add(spheres, Translate(0.0, 0.0, 0.0)*Scale(16, 16, 16));
     
@@ -312,6 +337,22 @@ void Scene::InitializeScene()
     debugToggle = false;
     screen = new Screen();
     
+
+    // shadow fbo setup
+    shadowFBO = new FBO();
+    shadowFBO->CreateFBO(1280, 1280, 4); // 0~3 are for G-Buffer
+    CHECKERROR;
+
+    vFBO = new FBO();
+    vFBO->CreateFBO(1280, 1280, 5);
+    CHECKERROR;
+
+    hFBO = new FBO();
+    hFBO->CreateFBO(1280, 1280, 6);
+    CHECKERROR;
+
+    // compute shader stuff
+    blur_size = 50;
 }
 
 void Scene::DrawMenu()
@@ -345,7 +386,12 @@ void Scene::DrawMenu()
             ImGui::Checkbox("Local light1", &(localLight1->drawMe));
             ImGui::Checkbox("Local light2", &(localLight2->drawMe));
             ImGui::Checkbox("Local light3", &(localLight3->drawMe));       
-            ImGui::Checkbox("Show Range", &debugToggle);       
+            ImGui::Checkbox("Show Range", &debugToggle);
+            ImGui::SliderInt("Blur_size", &blur_size, 0, 50);
+            ImGui::InputFloat3("lightPos", &lightPos[0]);
+            ImGui::InputFloat3("centerPos", &centerPos[0]);
+            ImGui::DragFloat("radius", &centerRadius, 1.0f, 0.0f, 150.0f, "%.3f");
+
             ImGui::EndMenu(); }
         
         ImGui::EndMainMenuBar(); }
@@ -401,6 +447,26 @@ void Scene::DrawScene()
     lightPos = glm::vec3(lightDist*cos(lightSpin*rad)*sin(lightTilt*rad),
                          lightDist*sin(lightSpin*rad)*sin(lightTilt*rad), 
                          lightDist*cos(lightTilt*rad));
+
+    float dist = glm::distance(lightPos, centerPos);
+    float minDist = dist - centerRadius;
+    float maxDist = dist + centerRadius;
+
+    // comput LookAt Maxtrix
+    lookAtPos = glm::vec3(0.1, 0.0, 1.5);
+    glm::vec3 lookAtV = glm::normalize(lookAtPos - lightPos);
+    glm::vec3 lookAtA = glm::normalize(glm::cross(lookAtV, glm::vec3(0.0, 0.0, 1.0)));
+    glm::vec3 lookAtB = glm::cross(lookAtA, lookAtV);    
+    float lightRy = 40.0 / lightDist;
+    float lightRx = lightRy;
+    glm::mat4 ProjectionMatrix = Perspective(lightRx, lightRy, front, back);
+    glm::mat4 ViewMatrix = glm::mat4(lookAtA.x, lookAtB.x, -lookAtV.x, 0.0,
+                                     lookAtA.y, lookAtB.y, -lookAtV.y, 0.0,
+                                     lookAtA.z, lookAtB.z, -lookAtV.z, 0.0,
+                                     0.0, 0.0, 0.0, 1.0);
+    ViewMatrix *= Translate(-lightPos.x, -lightPos.y, -lightPos.z);
+    ShadowMatrix = Translate(0.5, 0.5, 0.5) * Scale(0.5, 0.5, 0.5);
+    ShadowMatrix = ShadowMatrix * ProjectionMatrix * ViewMatrix;
 
     // Update position of any continuously animating objects
     double atime = 360.0*glfwGetTime()/36;
@@ -458,14 +524,157 @@ void Scene::DrawScene()
     // Turn off the shader
     gbufferProgram->UnuseShader();
 
-    ///////////////////
-    // Lighting pass //
-    ///////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Shadow pass
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    shadowProgram->UseShader();
+    programId = shadowProgram->programId;
+
+    shadowFBO->BindFBO();
+
+    // Set the viewport, and clear the screen
+    glViewport(0, 0, shadowFBO->width, shadowFBO->height);
+    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    loc = glGetUniformLocation(programId, "ViewMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ViewMatrix));
+    loc = glGetUniformLocation(programId, "ProjectionMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ProjectionMatrix));
+    loc = glGetUniformLocation(programId, "minDist");
+    glUniform1f(loc, minDist);
+    loc = glGetUniformLocation(programId, "maxDist");
+    glUniform1f(loc, maxDist);
+    CHECKERROR;
+
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+
+    // Draw all objects (This recursively traverses the object hierarchy.)
+    objectRoot->Draw(shadowProgram, Identity);
+    CHECKERROR;
+
+    glDisable(GL_CULL_FACE);
+
+    //Unbind FBO
+    shadowFBO->UnbindFBO();
+
+    // Turn off the shader
+    shadowProgram->UnuseShader();
+
+
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // compute shader pass vertical
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // calculate weight for shadow blur
+    
+    float sum = 0.0f;
+    if (blur_size == 0) {
+        weights[0] = 1.0;
+    }
+    else {
+        for (int i = -blur_size; i <= blur_size; ++i) {
+            float s = (float)blur_size / 2.0;
+            weights[i + blur_size] = powf(glm::e<float>(), -0.5 * ((float)i / s) * ((float)i / s));
+            sum += weights[i + blur_size];
+        }
+
+        // normalize weight
+        for (auto& w : weights) { w /= sum; }
+    }
+
+    unsigned int bindPoint = 0;
+    unsigned int blockID   = 0;
+
+    computeProgram_v->UseShader();
+    programId = computeProgram_v->programId;
+
+    // bind fbo
+    shadowFBO->BindTexture(4, programId, "shadowMap");
+    vFBO->BindTexture(5, programId, "msmV");
+
+    bindPoint = computeShader_v->GetBindPoint();
+    blockID = computeShader_h->GetBlockID();
+
+    loc = glGetUniformBlockIndex(programId, "blurKernel");
+    glUniformBlockBinding(programId, loc, bindPoint);
+
+    glBindBuffer(GL_UNIFORM_BUFFER, blockID);
+    glBindBufferBase(GL_UNIFORM_BUFFER, bindPoint, blockID);
+
+    glBufferData(GL_UNIFORM_BUFFER, (2*blur_size + 1) * sizeof(float), weights.data(), GL_STATIC_DRAW);
+
+    loc = glGetUniformLocation(programId, "w");
+    glUniform1ui(loc, blur_size);
+
+    loc = glGetUniformLocation(programId, "src");
+    glBindImageTexture(0, shadowFBO->textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 0);
+
+    loc = glGetUniformLocation(programId, "dst");
+    glBindImageTexture(1, vFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 1);
+
+    glDispatchCompute(shadowFBO->width / 128, shadowFBO->height, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+    //unbind fbo
+    shadowFBO->UnbindFBO();
+    vFBO->UnbindFBO();
+    computeProgram_v->UnuseShader();
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // compute shader pass horizontal
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    computeProgram_h->UseShader();
+    programId = computeProgram_h->programId;
+
+    // bind fbo
+    vFBO->BindTexture(5, programId, "msmV");
+    hFBO->BindTexture(6, programId, "msmH");
+
+    bindPoint = computeShader_h->GetBindPoint();
+    blockID = computeShader_h->GetBlockID();
+
+    loc = glGetUniformBlockIndex(programId, "blurKernel");
+    glUniformBlockBinding(programId, loc, bindPoint);
+
+    glBindBuffer(GL_UNIFORM_BUFFER, blockID);
+    glBindBufferBase(GL_UNIFORM_BUFFER, bindPoint, blockID);
+
+    glBufferData(GL_UNIFORM_BUFFER, (2 * blur_size + 1) * sizeof(float), weights.data(), GL_STATIC_DRAW);
+
+    loc = glGetUniformLocation(programId, "w");
+    glUniform1ui(loc, blur_size);
+
+    loc = glGetUniformLocation(programId, "src");
+    glBindImageTexture(0, vFBO->textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 0);
+
+    loc = glGetUniformLocation(programId, "dst");
+    glBindImageTexture(1, hFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 1);
+
+    glDispatchCompute(vFBO->width, vFBO->height / 128, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+    //unbind fbo
+    vFBO->UnbindFBO();
+    hFBO->UnbindFBO();    
+    computeProgram_h->UnuseShader();
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    // lighting pass 
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // Enable & Disable
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
-    glEnable(GL_CULL_FACE);    
+    glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     CHECKERROR;
 
@@ -480,10 +689,13 @@ void Scene::DrawScene()
     CHECKERROR;
 
     // bind texture
-    G_Buffer->BindTexture(0, programId, "g_buffer_world_pos");
-    G_Buffer->BindTexture(1, programId, "g_buffer_world_norm");
-    G_Buffer->BindTexture(2, programId, "g_buffer_diffuse_color");
-    G_Buffer->BindTexture(3, programId, "g_buffer_specular_color");
+    G_Buffer->BindTexture( 0, programId, "g_buffer_world_pos");
+    G_Buffer->BindTexture( 1, programId, "g_buffer_world_norm");
+    G_Buffer->BindTexture( 2, programId, "g_buffer_diffuse_color");
+    G_Buffer->BindTexture( 3, programId, "g_buffer_specular_color");
+    shadowFBO->BindTexture(4, programId, "shadowMap");
+    vFBO->BindTexture(5, programId, "msmV");
+    hFBO->BindTexture(6, programId, "MSMap");
     CHECKERROR;
 
     // for BRDF
@@ -505,6 +717,14 @@ void Scene::DrawScene()
     glUniform1i(loc, drawID);
     loc = glGetUniformLocation(programId, "Toggle");
     glUniform1i(loc, flipToggle);
+    loc = glGetUniformLocation(programId, "ShadowMatrix");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
+    CHECKERROR;
+
+    loc = glGetUniformLocation(programId, "minDist");
+    glUniform1f(loc, minDist);
+    loc = glGetUniformLocation(programId, "maxDist");
+    glUniform1f(loc, maxDist);
     CHECKERROR;
 
     screen->DrawVAO();
@@ -515,11 +735,15 @@ void Scene::DrawScene()
     G_Buffer->UnbindTexture(1);
     G_Buffer->UnbindTexture(2);
     G_Buffer->UnbindTexture(3);
+    shadowFBO->UnbindTexture(4);
+    vFBO->UnbindTexture(5);
+    hFBO->UnbindTexture(6);
     CHECKERROR;
 
     // Turn off the shader
     lightingProgram->UnuseShader();
 
+    return;
     ///////////////////////
     // Local Lights pass //
     ///////////////////////

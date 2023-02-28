@@ -12,7 +12,7 @@ using namespace gl;
 
 #include "fbo.h"
 
-void FBO::CreateFBO(const int w, const int h)
+void FBO::CreateFBO(const int w, const int h, const int unit)
 {
     width = w;
     height = h;
@@ -43,9 +43,10 @@ void FBO::CreateFBO(const int w, const int h)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (int)GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (int)GL_LINEAR);
 
-    glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
+    gl::GLenum attachment = (gl::GLenum)((int)GL_COLOR_ATTACHMENT0_EXT + unit);
+    glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, attachment,
                               GL_TEXTURE_2D, textureID, 0);
-
+    glDrawBuffers(1, &attachment);
     // Check for completeness/correctness
     int status = (int)glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT);
     if (status != int(GL_FRAMEBUFFER_COMPLETE_EXT))
@@ -160,7 +161,7 @@ void FBO::BindTexture(const int unit, const int programId, const std::string& na
     case 3:
         currID = specularID;
         break;
-    case 4:
+    default:
         currID = textureID;
     }
 

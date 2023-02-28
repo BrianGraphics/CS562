@@ -111,6 +111,7 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="ComputeShader.cpp" />
     <ClCompile Include="fbo.cpp" />
     <ClCompile Include="framework.cpp" />
     <ClCompile Include="libs\imgui-master\backends\imgui_impl_glfw.cpp" />
@@ -132,6 +133,9 @@
   </ItemGroup>
   <ItemGroup>
     <Library Include="libs\glfw\lib-vc2019\glfw3.lib" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ComputeShader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
