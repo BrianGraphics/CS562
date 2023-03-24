@@ -74,7 +74,8 @@ public:
     // All objects in the scene are children of this single root object.
     Object* objectRoot;
     Object *central, *anim, *room, *floor, *teapot, *podium, *sky,
-            *ground, *sea, *spheres, *leftFrame, *rightFrame;
+           *ground, *sea, *spheres, *leftFrame, *rightFrame,
+           *bunny, *dragon;
 
     Object* lightsRoot;
     Object* localLight1, *localLight2, *localLight3;

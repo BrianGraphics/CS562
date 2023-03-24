@@ -1,6 +1,6 @@
 #version 460
 
-layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
+layout (local_size_x = 1, local_size_y = 128, local_size_z = 1) in;
 uniform uint w;
 uniform blurKernel { float weights[101]; };
 
@@ -11,17 +11,16 @@ shared vec4 v[128+101]; // Variable shared with other threads in the 128x1 threa
 
 void main()
 {
-  ivec2 gpos = ivec2(gl_GlobalInvocationID.xy);
-  uint i = gl_LocalInvocationID.x;
-  v[i] = imageLoad(src, gpos + ivec2(-w, 0));
-  if (i<2*w) v[i+128] = imageLoad(src, gpos + ivec2(128 - w, 0));
+  ivec2 gpos = ivec2(gl_GlobalInvocationID.xy); 
+  uint i = gl_LocalInvocationID.y;
+  v[i] = imageLoad(src, gpos + ivec2(0, -w)); 
+  if (i<2*w) v[i+128] = imageLoad(src, gpos + ivec2(0, 128 - w));
   barrier();
   
   vec4 sum = vec4(0.0);
   for(uint index = i; index <= i + 2*w; index++) {
     sum += weights[index - i] * v[index];
   }
-  
-  vec4 result = sum;//vec4(sum, sum*sum, sum*sum*sum, sum*sum*sum*sum);
-  imageStore(dst, gpos, result); // Write to destination imag         
+
+  imageStore(dst, gpos, sum); // Write to destination imag         
 }

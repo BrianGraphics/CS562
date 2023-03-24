@@ -148,8 +148,7 @@ void Scene::InitializeScene()
     front = 0.5;
     back = 5000.0;
 
-    centerPos.z  = -30.0f;
-    centerRadius = 100.0f;
+    centerRadius = 15.0f;
     weights.assign(101, 0);
 
     CHECKERROR;
@@ -194,19 +193,19 @@ void Scene::InitializeScene()
     glBindAttribLocation(shadowProgram->programId, 0, "vertex");
     shadowProgram->LinkProgram();
 
-    computeProgram_v = new ShaderProgram();
-    computeProgram_v->AddShader("shaders\\convolution_v.comp", GL_COMPUTE_SHADER);
-    computeProgram_v->LinkProgram();
-
-    computeShader_v = new ComputeShader();
-    computeShader_v->SetShader(computeProgram_v);
-
     computeProgram_h = new ShaderProgram();
     computeProgram_h->AddShader("shaders\\convolution_h.comp", GL_COMPUTE_SHADER);
     computeProgram_h->LinkProgram();
 
     computeShader_h = new ComputeShader();
     computeShader_h->SetShader(computeProgram_h);
+
+    computeProgram_v = new ShaderProgram();
+    computeProgram_v->AddShader("shaders\\convolution_v.comp", GL_COMPUTE_SHADER);
+    computeProgram_v->LinkProgram();
+
+    computeShader_v = new ComputeShader();
+    computeShader_v->SetShader(computeProgram_v);
 
 
 
@@ -219,11 +218,14 @@ void Scene::InitializeScene()
     Shape* TeapotPolygons =  new Teapot(fullPolyCount?12:2);
     Shape* BoxPolygons = new Box();
     Shape* SpherePolygons = new Sphere(32);
-    Shape* RoomPolygons = new Ply("room.ply");
+    Shape* RoomPolygons = new Ply("models//room.ply");
     Shape* FloorPolygons = new Plane(10.0, 10);
     Shape* QuadPolygons = new Quad();
     Shape* SeaPolygons = new Plane(2000.0, 50);
     Shape* GroundPolygons = proceduralground;
+
+    Shape* BunnyPolygons  = new Ply("models//bunny.ply");
+    Shape* DragonPolygons = new Ply("models//dragon.ply");
 
     // Various colors used in the subsequent models
     glm::vec3 woodColor(87.0/255.0, 51.0/255.0, 35.0/255.0);
@@ -253,11 +255,16 @@ void Scene::InitializeScene()
     anim       = new Object(NULL, nullId);
     room = new Object(RoomPolygons, roomId, brickColor, black, 1); room->drawMe = false;
     floor      = new Object(FloorPolygons, floorId, floorColor, black, 1);
-    teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120);
+    teapot     = new Object(TeapotPolygons, teapotId, glm::vec3(1.0f), brightSpec, 120);
+    //teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120);
     podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), polishedSpec, 10); 
     sky        = new Object(SpherePolygons, skyId, black, black, 0);
     ground = new Object(GroundPolygons, groundId, grassColor, black, 1);
     sea = new Object(SeaPolygons, seaId, waterColor, brightSpec, 120);
+
+    bunny  = new Object(BunnyPolygons, nullId, glm::vec3(0.5, 0.5, 0.5), brightSpec, 1.0);
+    dragon = new Object(DragonPolygons, nullId, glm::vec3(0.5, 0.5, 0.5), brightSpec, 1.0);
+
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons);
     rightFrame = FramedPicture(Identity, rPicId, BoxPolygons, QuadPolygons); 
     spheres    = SphereOfSpheres(SpherePolygons);
@@ -302,9 +309,8 @@ void Scene::InitializeScene()
     animated.push_back(anim);
 
     // Central contains a teapot on a podium and an external sphere of spheres
-    //central->add(podium, Translate(0.0, 0,0));
     central->add(anim, Translate(0.0, 0,0));
-    anim->add(teapot, Translate(0.0, 0.0, 1.5)*Scale(3.0, 3.0, 3.0) * TeapotPolygons->modelTr);
+ 
     if (fullPolyCount)
         anim->add(spheres, Translate(0.0, 0.0, 0.0)*Scale(16, 16, 16));
     
@@ -313,6 +319,10 @@ void Scene::InitializeScene()
         room->add(leftFrame, Translate(-1.5, 9.85, 1.)*Scale(0.8, 0.8, 0.8));
         room->add(rightFrame, Translate( 1.5, 9.85, 1.)*Scale(0.8, 0.8, 0.8)); }
 
+
+    objectRoot->add(bunny, Translate(6.0, -6.0, 0.0) * Rotate(2, 45.0) * Scale(3.0, 3.0, 3.0));
+    objectRoot->add(dragon, Translate(-6.0, 6.0, 0.0) * Rotate(2, 45.0) * Scale(3.0, 3.0, 3.0));
+    objectRoot->add(teapot, Identity);
 
     lightsRoot->add(localLight1, Translate(localLight1->position.x, localLight1->position.y, localLight1->position.z)
                                  * Scale(localLight1->range, localLight1->range, localLight1->range));
@@ -343,16 +353,16 @@ void Scene::InitializeScene()
     shadowFBO->CreateFBO(1280, 1280, 4); // 0~3 are for G-Buffer
     CHECKERROR;
 
-    vFBO = new FBO();
-    vFBO->CreateFBO(1280, 1280, 5);
+    hFBO = new FBO();
+    hFBO->CreateFBO(1280, 1280, 5);
     CHECKERROR;
 
-    hFBO = new FBO();
-    hFBO->CreateFBO(1280, 1280, 6);
+    vFBO = new FBO();
+    vFBO->CreateFBO(1280, 1280, 6);
     CHECKERROR;
 
     // compute shader stuff
-    blur_size = 50;
+    blur_size = 4;
 }
 
 void Scene::DrawMenu()
@@ -566,7 +576,7 @@ void Scene::DrawScene()
 
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // compute shader pass vertical
+    // compute shader pass horizontal
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     // calculate weight for shadow blur
@@ -589,12 +599,12 @@ void Scene::DrawScene()
     unsigned int bindPoint = 0;
     unsigned int blockID   = 0;
 
-    computeProgram_v->UseShader();
-    programId = computeProgram_v->programId;
+    computeProgram_h->UseShader();
+    programId = computeProgram_h->programId;
 
     // bind fbo
     shadowFBO->BindTexture(4, programId, "shadowMap");
-    vFBO->BindTexture(5, programId, "msmV");
+    hFBO->BindTexture(5, programId, "msmH");
 
     bindPoint = computeShader_v->GetBindPoint();
     blockID = computeShader_h->GetBlockID();
@@ -615,7 +625,7 @@ void Scene::DrawScene()
     glUniform1i(loc, 0);
 
     loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(1, vFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, hFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(loc, 1);
 
     glDispatchCompute(shadowFBO->width / 128, shadowFBO->height, 1);
@@ -623,19 +633,19 @@ void Scene::DrawScene()
 
     //unbind fbo
     shadowFBO->UnbindFBO();
-    vFBO->UnbindFBO();
-    computeProgram_v->UnuseShader();
+    hFBO->UnbindFBO();
+    computeProgram_h->UnuseShader();
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // compute shader pass horizontal
+    // compute shader pass vertical
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    computeProgram_h->UseShader();
+    computeProgram_v->UseShader();
     programId = computeProgram_h->programId;
-
+    
     // bind fbo
-    vFBO->BindTexture(5, programId, "msmV");
-    hFBO->BindTexture(6, programId, "msmH");
+    hFBO->BindTexture(5, programId, "msmH");
+    vFBO->BindTexture(6, programId, "msmV");
 
     bindPoint = computeShader_h->GetBindPoint();
     blockID = computeShader_h->GetBlockID();
@@ -652,20 +662,20 @@ void Scene::DrawScene()
     glUniform1ui(loc, blur_size);
 
     loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(0, vFBO->textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(0, hFBO->textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(loc, 0);
 
     loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(1, hFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, vFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(loc, 1);
 
     glDispatchCompute(vFBO->width, vFBO->height / 128, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
     //unbind fbo
-    vFBO->UnbindFBO();
-    hFBO->UnbindFBO();    
-    computeProgram_h->UnuseShader();
+    hFBO->UnbindFBO();
+    vFBO->UnbindFBO();    
+    computeProgram_v->UnuseShader();
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // lighting pass 
@@ -694,8 +704,8 @@ void Scene::DrawScene()
     G_Buffer->BindTexture( 2, programId, "g_buffer_diffuse_color");
     G_Buffer->BindTexture( 3, programId, "g_buffer_specular_color");
     shadowFBO->BindTexture(4, programId, "shadowMap");
-    vFBO->BindTexture(5, programId, "msmV");
-    hFBO->BindTexture(6, programId, "MSMap");
+    hFBO->BindTexture(5, programId, "msmH");
+    vFBO->BindTexture(6, programId, "MSMap");
     CHECKERROR;
 
     // for BRDF
@@ -736,8 +746,8 @@ void Scene::DrawScene()
     G_Buffer->UnbindTexture(2);
     G_Buffer->UnbindTexture(3);
     shadowFBO->UnbindTexture(4);
-    vFBO->UnbindTexture(5);
-    hFBO->UnbindTexture(6);
+    hFBO->UnbindTexture(5);
+    vFBO->UnbindTexture(6);
     CHECKERROR;
 
     // Turn off the shader

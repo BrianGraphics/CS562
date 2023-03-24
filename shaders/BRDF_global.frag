@@ -28,7 +28,7 @@ uniform vec3  lightAmb;
 
 // for shadow
 uniform sampler2D shadowMap;
-uniform sampler2D msmV;
+uniform sampler2D msmH;
 uniform sampler2D MSMap;
 uniform mat4 ShadowMatrix;
 
@@ -86,7 +86,7 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
     BRDF_part =  (Kd / pi) + (F * G1 * G2 * D / (4 * LdotN * VdotN));
     
     float G = 0.0f;
-    //float s = 1.0f;
+    float s = 1.0f;
     vec4 shadowCoord = ShadowMatrix  * vec4(Pos, 1.0);
     if(shadowCoord.w > 0){      
         vec2 shadowIndex = shadowCoord.xy / shadowCoord.w;    
@@ -98,18 +98,16 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
           float z1 = maxDist;
           float z0 = minDist;
           float pixel_depth  = (t - z0) / (z1 - z0);
-          //return vec3(pixel_depth, pixel_depth*pixel_depth, pixel_depth*pixel_depth*pixel_depth);
           vec4 light_depth = texture2D(MSMap, shadowIndex); 
-          //return light_depth.xyz;
           
           //if(pixel_depth - 0.005 > light_depth.x) {
-            //float M1 = light_depth.x;
-            //float M2 = light_depth.y;
-            //float var = M2 - M1*M1;                                
-            //s = var/(var + (pixel_depth - M1) * (pixel_depth - M1));          
-            
-            G = cholesky(light_depth, pixel_depth);
+          //  float M1 = light_depth.x;
+          //  float M2 = light_depth.y;
+          //  float var = M2 - M1*M1;                                
+          //  s = var/(var + (pixel_depth - M1) * (pixel_depth - M1));                                  
           //}
+
+          G = cholesky(light_depth, pixel_depth);
         }
     }
 
