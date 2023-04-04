@@ -1,4 +1,4 @@
-#version 330
+#version 460
 
 uniform mat4 WorldView, WorldInverse, WorldProj, ModelTr, NormalTr;
 

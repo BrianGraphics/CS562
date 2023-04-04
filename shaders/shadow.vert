@@ -1,4 +1,4 @@
-#version 330
+#version 460
 
 uniform mat4 ProjectionMatrix, ViewMatrix, ModelTr;
 in vec4 vertex;

@@ -119,6 +119,18 @@ Object* FramedPicture(const glm::mat4& modelTr, const int objectId,
     return frame;
 }
 
+Scene::~Scene() {
+    delete gbufferProgram;
+    delete lightingProgram;
+    delete shadowProgram;
+    delete localLightsProgram;
+    delete computeProgram_h;
+    delete computeProgram_v;    
+
+    delete irradianceMap;
+    delete skyTex;
+}
+
 ////////////////////////////////////////////////////////////////////////
 // InitializeScene is called once during setup to create all the
 // textures, shape VAOs, and shader programs as well as setting a
@@ -151,7 +163,13 @@ void Scene::InitializeScene()
     centerRadius = 15.0f;
     weights.assign(101, 0);
 
+    specularOn = false;
+    Exposure = 1.0f;
+    block.N = 20.0;
+    block.hammersley.assign(200, 0.0);
+    glGenBuffers(1, &block.id);
     CHECKERROR;
+
     objectRoot = new Object(NULL, nullId);
 
     // Create the lighting shader program from source code files.
@@ -207,8 +225,14 @@ void Scene::InitializeScene()
     computeShader_v = new ComputeShader();
     computeShader_v->SetShader(computeProgram_v);
 
+    preCalProgram = new ShaderProgram();
+    preCalProgram->AddShader("shaders\\preCalculation.comp", GL_COMPUTE_SHADER);
+    preCalProgram->LinkProgram();
 
-
+    irrProgram = new ShaderProgram();
+    irrProgram->AddShader("shaders\\irradiance.comp", GL_COMPUTE_SHADER);
+    irrProgram->LinkProgram();
+    CHECKERROR;
     
     // Create all the Polygon shapes
     proceduralground = new ProceduralGround(grndSize, 400,
@@ -225,7 +249,7 @@ void Scene::InitializeScene()
     Shape* GroundPolygons = proceduralground;
 
     Shape* BunnyPolygons  = new Ply("models//bunny.ply");
-    Shape* DragonPolygons = new Ply("models//dragon.ply");
+    //Shape* DragonPolygons = new Ply("models//dragon.ply");
 
     // Various colors used in the subsequent models
     glm::vec3 woodColor(87.0/255.0, 51.0/255.0, 35.0/255.0);
@@ -254,16 +278,16 @@ void Scene::InitializeScene()
     central    = new Object(NULL, nullId);
     anim       = new Object(NULL, nullId);
     room = new Object(RoomPolygons, roomId, brickColor, black, 1); room->drawMe = false;
-    floor      = new Object(FloorPolygons, floorId, floorColor, black, 1);
-    teapot     = new Object(TeapotPolygons, teapotId, glm::vec3(1.0f), brightSpec, 120);
+    floor      = new Object(FloorPolygons, floorId, floorColor, black, 200);
+    teapot     = new Object(TeapotPolygons, teapotId, glm::vec3(1.0f, 0.0, 0.0), brightSpec, 120.0);
     //teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120);
     podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), polishedSpec, 10); 
-    sky        = new Object(SpherePolygons, skyId, black, black, 0);
-    ground = new Object(GroundPolygons, groundId, grassColor, black, 1);
-    sea = new Object(SeaPolygons, seaId, waterColor, brightSpec, 120);
+    sky        = new Object(SpherePolygons, skyId, glm::vec3(1.0, 0.0, 0.0), black, 0);
+    ground = new Object(GroundPolygons, groundId, grassColor, black, 1); ground->drawMe = false;
+    sea = new Object(SeaPolygons, seaId, waterColor, brightSpec, 120); sea->drawMe = false;
 
-    bunny  = new Object(BunnyPolygons, nullId, glm::vec3(0.5, 0.5, 0.5), brightSpec, 1.0);
-    dragon = new Object(DragonPolygons, nullId, glm::vec3(0.5, 0.5, 0.5), brightSpec, 1.0);
+    bunny  = new Object(BunnyPolygons, nullId, glm::vec3(1.0, 1.0, 1.0), brightSpec, 120.0);
+    //dragon = new Object(DragonPolygons, nullId, glm::vec3(1.0, 1.0, 1.0), brightSpec, 120.0);
 
     leftFrame  = FramedPicture(Identity, lPicId, BoxPolygons, QuadPolygons);
     rightFrame = FramedPicture(Identity, rPicId, BoxPolygons, QuadPolygons); 
@@ -303,7 +327,7 @@ void Scene::InitializeScene()
 #ifndef REFL
     objectRoot->add(room,  Translate(0.0, 0.0, 0.02));
 #endif
-    objectRoot->add(floor, Translate(0.0, 0.0, 0.02));
+    //objectRoot->add(floor, Translate(0.0, 0.0, 0.02));
 
     // Central model has a rudimentary animation (constant rotation on Z)
     animated.push_back(anim);
@@ -321,7 +345,7 @@ void Scene::InitializeScene()
 
 
     objectRoot->add(bunny, Translate(6.0, -6.0, 0.0) * Rotate(2, 45.0) * Scale(3.0, 3.0, 3.0));
-    objectRoot->add(dragon, Translate(-6.0, 6.0, 0.0) * Rotate(2, 45.0) * Scale(3.0, 3.0, 3.0));
+    //objectRoot->add(dragon, Translate(-6.0, 6.0, 0.0) * Rotate(2, 45.0) * Scale(3.0, 3.0, 3.0));
     objectRoot->add(teapot, Identity);
 
     lightsRoot->add(localLight1, Translate(localLight1->position.x, localLight1->position.y, localLight1->position.z)
@@ -363,6 +387,16 @@ void Scene::InitializeScene()
 
     // compute shader stuff
     blur_size = 4;
+
+    irradianceMap = new Texture("skys//Newport_Loft_Ref.irr.hdr");
+    skyTex = new Texture("skys//Newport_Loft_Ref.hdr");
+
+    irrFBO = new FBO();
+    irrFBO->CreateFBO(200, 100, 7);
+
+    coeffFBO = new FBO();
+    coeffFBO->CreateFBO(9, 1, 7);
+    CHECKERROR;
 }
 
 void Scene::DrawMenu()
@@ -377,7 +411,7 @@ void Scene::DrawMenu()
             if (ImGui::MenuItem("Draw spheres", "", spheres->drawMe))  {spheres->drawMe ^= true; }
             if (ImGui::MenuItem("Draw walls", "", room->drawMe))       {room->drawMe ^= true; }
             if (ImGui::MenuItem("Draw ground/sea", "", ground->drawMe)){ground->drawMe ^= true;
-                							sea->drawMe = ground->drawMe;}
+            sea->drawMe = ground->drawMe;}
             ImGui::EndMenu(); }
                 	
         // This menu demonstrates how to provide the user a choice
@@ -393,15 +427,9 @@ void Scene::DrawMenu()
             ImGui::SliderInt("Switch", &drawID, 0, 4);
             ImGui::SliderInt("Toggle", &flipToggle, 0, 2);
 
-            ImGui::Checkbox("Local light1", &(localLight1->drawMe));
-            ImGui::Checkbox("Local light2", &(localLight2->drawMe));
-            ImGui::Checkbox("Local light3", &(localLight3->drawMe));       
-            ImGui::Checkbox("Show Range", &debugToggle);
-            ImGui::SliderInt("Blur_size", &blur_size, 0, 50);
-            ImGui::InputFloat3("lightPos", &lightPos[0]);
-            ImGui::InputFloat3("centerPos", &centerPos[0]);
-            ImGui::DragFloat("radius", &centerRadius, 1.0f, 0.0f, 150.0f, "%.3f");
-
+            ImGui::Checkbox("specular", &specularOn);
+            ImGui::DragFloat("exposure", &Exposure, 0.1f, 0.0f, 10.0f, "%.1f");
+            ImGui::DragFloat("Number of paris", &block.N, 1.0f, 0.0f, 100.0f);
             ImGui::EndMenu(); }
         
         ImGui::EndMainMenuBar(); }
@@ -433,13 +461,47 @@ void Scene::BuildTransforms()
         WorldView = Rotate(0, tilt-90)*Rotate(2, spin) *Translate(-eye[0], -eye[1], -eye[2]);
     else
         WorldView = Translate(tr[0], tr[1], -tr[2]) *Rotate(0, tilt-90)*Rotate(2, spin);
-    WorldProj = Perspective((ry*width)/height, ry, front, (mode==0) ? 1000 : back);
+    WorldProj = Perspective((ry*width)/height, ry, front, (mode==0) ? back : 1000);
 
 
     // @@ Print the two matrices (in column-major order) for
     // comparison with the project document.
     //std::cout << "WorldView: " << glm::to_string(WorldView) << std::endl;
     //std::cout << "WorldProj: " << glm::to_string(WorldProj) << std::endl;
+}
+
+void Scene::CalculateSH()
+{
+    unsigned int programId, loc;
+    preCalProgram->UseShader();
+    programId = irrProgram->programId;
+
+    loc = glGetUniformLocation(programId, "src");
+    glBindImageTexture(0, skyTex->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
+    glUniform1i(loc, 0);
+
+    loc = glGetUniformLocation(programId, "dst");
+    glBindImageTexture(1, coeffFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 1);
+
+    glDispatchCompute(1, 1, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+    preCalProgram->UnuseShader();
+
+    irrProgram->UseShader();
+    programId = irrProgram->programId;
+
+    loc = glGetUniformLocation(programId, "src");
+    glBindImageTexture(2, coeffFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+
+    loc = glGetUniformLocation(programId, "dst");
+    glBindImageTexture(3, irrFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+
+    glDispatchCompute(irrFBO->width, irrFBO->height, 1);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+    irrProgram->UnuseShader();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -487,8 +549,8 @@ void Scene::DrawScene()
 
     // The lighting algorithm needs the inverse of the WorldView matrix
     WorldInverse = glm::inverse(WorldView);
-
     CHECKERROR;
+
     int loc, programId;
 
     ///////////////////
@@ -514,6 +576,12 @@ void Scene::DrawScene()
     glClearColor(0.5, 0.5, 0.5, 1.0);
     glClear(GL_COLOR_BUFFER_BIT| GL_DEPTH_BUFFER_BIT);
 
+    // Bind Texture
+    glActiveTexture(GL_TEXTURE11);
+    glBindTexture(GL_TEXTURE_2D, skyTex->textureId);
+
+
+
     // Uniforms
     loc = glGetUniformLocation(programId, "WorldProj");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
@@ -521,12 +589,16 @@ void Scene::DrawScene()
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
     loc = glGetUniformLocation(programId, "WorldInverse");
     glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+    loc = glGetUniformLocation(programId, "skyTex");
+    glUniform1i(loc, 11);
     CHECKERROR;
 
     // Draw all objects
     objectRoot->Draw(gbufferProgram, Identity);
     CHECKERROR; 
 
+    // unbind texture
+    skyTex->UnbindTexture(11);
 
     // unbind FBO
     G_Buffer->UnbindFBO();
@@ -587,7 +659,7 @@ void Scene::DrawScene()
     }
     else {
         for (int i = -blur_size; i <= blur_size; ++i) {
-            float s = (float)blur_size / 2.0;
+            float s = (float)blur_size / 2.0;            
             weights[i + blur_size] = powf(glm::e<float>(), -0.5 * ((float)i / s) * ((float)i / s));
             sum += weights[i + blur_size];
         }
@@ -618,14 +690,14 @@ void Scene::DrawScene()
     glBufferData(GL_UNIFORM_BUFFER, (2*blur_size + 1) * sizeof(float), weights.data(), GL_STATIC_DRAW);
 
     loc = glGetUniformLocation(programId, "w");
-    glUniform1ui(loc, blur_size);
+    glUniform1i(loc, blur_size);
 
     loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(0, shadowFBO->textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(0, shadowFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(loc, 0);
 
     loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(1, hFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, hFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(loc, 1);
 
     glDispatchCompute(shadowFBO->width / 128, shadowFBO->height, 1);
@@ -659,14 +731,14 @@ void Scene::DrawScene()
     glBufferData(GL_UNIFORM_BUFFER, (2 * blur_size + 1) * sizeof(float), weights.data(), GL_STATIC_DRAW);
 
     loc = glGetUniformLocation(programId, "w");
-    glUniform1ui(loc, blur_size);
+    glUniform1i(loc, blur_size);
 
     loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(0, hFBO->textureID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(0, hFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(loc, 0);
 
     loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(1, vFBO->textureID, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glBindImageTexture(1, vFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(loc, 1);
 
     glDispatchCompute(vFBO->width, vFBO->height / 128, 1);
@@ -680,6 +752,22 @@ void Scene::DrawScene()
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // lighting pass 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // build block for Monte Carlo
+    int pos = 0;
+    int num_pairs = static_cast<int>(block.N);
+    for (int k = 0; k < num_pairs; ++k) {
+        float p = 0.5f;
+        float u = 0.0f;
+        for (int kk = k; kk; p *= 0.5f, kk >>= 1) {
+            if (kk & 1)
+                u += p;
+        }
+
+        float v = (k + 0.5) / num_pairs;
+        block.hammersley[pos++] = u;
+        block.hammersley[pos++] = v;
+    }
 
     // Enable & Disable
     glEnable(GL_DEPTH_TEST);
@@ -706,6 +794,12 @@ void Scene::DrawScene()
     shadowFBO->BindTexture(4, programId, "shadowMap");
     hFBO->BindTexture(5, programId, "msmH");
     vFBO->BindTexture(6, programId, "MSMap");
+
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_2D, irradianceMap->textureId);
+    glActiveTexture(GL_TEXTURE11);
+    glBindTexture(GL_TEXTURE_2D, skyTex->textureId);
+    irrFBO->BindTexture(7, programId, "SHCoeff");
     CHECKERROR;
 
     // for BRDF
@@ -737,6 +831,38 @@ void Scene::DrawScene()
     glUniform1f(loc, maxDist);
     CHECKERROR;
 
+    loc = glGetUniformLocation(programId, "exposure");
+    glUniform1f(loc, Exposure);
+
+    // irradiance map & skydome texture
+    loc = glGetUniformLocation(programId, "irrMap");
+    glUniform1i(loc, 10);
+    loc = glGetUniformLocation(programId, "skyTex");
+    glUniform1i(loc, 11);
+    loc = glGetUniformLocation(programId, "skyWidth");
+    glUniform1f(loc, static_cast<float>(skyTex->width));
+    loc = glGetUniformLocation(programId, "skyHeight");
+    glUniform1f(loc, static_cast<float>(skyTex->height));
+
+    // for random points
+    unsigned int bindpoint = 1; 
+    glBindBufferBase(GL_UNIFORM_BUFFER, bindpoint, block.id);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STATIC_DRAW);
+    loc = glGetUniformBlockIndex(programId, "HammersleyBlock");
+    glUniformBlockBinding(programId, loc, bindpoint);
+    loc = glGetUniformLocation(programId, "specularOn");
+    glUniform1ui(loc, specularOn);
+
+    // for renderdoc to see the value
+    loc = glGetUniformLocation(programId, "testblock");
+    glUniform1fv(loc, block.hammersley.size(), &(block.hammersley[0]));
+    CHECKERROR;
+
+    //loc = glGetUniformLocation(programId, "SH");
+    //glBindImageTexture(7, irrFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    //glUniform1i(loc, 7);
+    CHECKERROR;
+
     screen->DrawVAO();
     CHECKERROR;
 
@@ -748,70 +874,12 @@ void Scene::DrawScene()
     shadowFBO->UnbindTexture(4);
     hFBO->UnbindTexture(5);
     vFBO->UnbindTexture(6);
+    irrFBO->UnbindTexture(7);
+    
+    irradianceMap->UnbindTexture(10);
+    skyTex->UnbindTexture(11);    
     CHECKERROR;
 
     // Turn off the shader
     lightingProgram->UnuseShader();
-
-    return;
-    ///////////////////////
-    // Local Lights pass //
-    ///////////////////////
-
-    // Enable & Disable
-    glDisable(GL_DEPTH_TEST);    
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE);
-
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-
-    // Choose Shader
-    localLightsProgram->UseShader();
-    programId = localLightsProgram->programId;
-
-    // bind texture
-    G_Buffer->BindTexture(0, programId, "g_buffer_world_pos");
-    G_Buffer->BindTexture(1, programId, "g_buffer_world_norm");
-    G_Buffer->BindTexture(2, programId, "g_buffer_diffuse_color");
-    G_Buffer->BindTexture(3, programId, "g_buffer_specular_color");
-    CHECKERROR;
-
-    // Set the viewport
-    glViewport(0, 0, width, height);
-    CHECKERROR;
-
-    loc = glGetUniformLocation(programId, "WorldProj");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldProj));
-    loc = glGetUniformLocation(programId, "WorldView");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldView));
-    CHECKERROR;
-
-    // For BRDF
-    loc = glGetUniformLocation(programId, "WorldInverse");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    CHECKERROR;
-
-    loc = glGetUniformLocation(programId, "width");
-    glUniform1ui(loc, width);
-    loc = glGetUniformLocation(programId, "height");
-    glUniform1ui(loc, height);
-    CHECKERROR;
-
-    loc = glGetUniformLocation(programId, "debugLocalLight");
-    glUniform1i(loc, debugToggle);
-    CHECKERROR;
-
-    lightsRoot->Draw(localLightsProgram, Identity);
-    CHECKERROR;
-
-    // unbind textures
-    G_Buffer->UnbindTexture(0);
-    G_Buffer->UnbindTexture(1);
-    G_Buffer->UnbindTexture(2);
-    G_Buffer->UnbindTexture(3);
-    CHECKERROR;
-
-    // Turn off the shader
-    localLightsProgram->UnuseShader();
 }

@@ -9,7 +9,7 @@
 class FBO {
 public:
     unsigned int fboID;
-    unsigned int textureID;
+    unsigned int textureId;
     unsigned int currID;
 
     // 4 IDs

@@ -33,8 +33,8 @@ void FBO::CreateFBO(const int w, const int h, const int unit)
     // GL_RGBA32F and GL_RGBA constants set this texture to be 32 bit
     // floats for each of the 4 components.  Many other choices are
     // possible.
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
+    glGenTextures(1, &textureId);
+    glBindTexture(GL_TEXTURE_2D, textureId);
     glTexImage2D(GL_TEXTURE_2D, 0, (int)GL_RGBA32F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
@@ -45,7 +45,7 @@ void FBO::CreateFBO(const int w, const int h, const int unit)
 
     gl::GLenum attachment = (gl::GLenum)((int)GL_COLOR_ATTACHMENT0_EXT + unit);
     glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, attachment,
-                              GL_TEXTURE_2D, textureID, 0);
+                              GL_TEXTURE_2D, textureId, 0);
     glDrawBuffers(1, &attachment);
     // Check for completeness/correctness
     int status = (int)glCheckFramebufferStatusEXT(GL_FRAMEBUFFER_EXT);
@@ -162,7 +162,7 @@ void FBO::BindTexture(const int unit, const int programId, const std::string& na
         currID = specularID;
         break;
     default:
-        currID = textureID;
+        currID = textureId;
     }
 
     glBindTexture(GL_TEXTURE_2D, currID);

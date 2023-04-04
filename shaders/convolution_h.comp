@@ -1,7 +1,7 @@
 #version 460
 
 layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
-uniform uint w;
+uniform int w;
 uniform blurKernel { float weights[101]; };
 
 layout (rgba32f) uniform readonly  image2D src;
@@ -14,12 +14,12 @@ void main()
   ivec2 gpos = ivec2(gl_GlobalInvocationID.xy);
   uint i = gl_LocalInvocationID.x;
   h[i] = imageLoad(src, gpos + ivec2(-w, 0));
-  if (i<2*w) h[i+128] = imageLoad(src, gpos + ivec2(128 - w, 0));
+  if (i<2*w + 1) h[i+128] = imageLoad(src, gpos + ivec2(128 - w, 0));
   barrier();
   
   vec4 sum = vec4(0.0);
-  for(uint index = i; index <= i + 2*w; index++) {
-    sum += weights[index - i] * h[index];
+  for(uint index = 0; index <= 2*w; index++) {
+    sum += weights[index] * h[index + i];
   }
   
   imageStore(dst, gpos, sum);        

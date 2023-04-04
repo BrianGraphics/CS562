@@ -69,5 +69,13 @@
     <None Include="shaders\LocalLights.vert">
       <Filter>Shaders</Filter>
     </None>
+    <None Include="shaders\shadow.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\shadow.vert">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\irradiance.comp" />
+    <None Include="shaders\preCalculation.comp" />
   </ItemGroup>
 </Project>

@@ -49,6 +49,7 @@ int main(int argc, char** argv)
     // Initialize interaction and the scene to be drawn.
     InitInteraction();
     scene.InitializeScene();
+    scene.CalculateSH();
     
     // Enter the event loop.
     while (!glfwWindowShouldClose(scene.window)) {

@@ -1,6 +1,6 @@
-#version 330
-
+#version 460
 in vec4 position;
+out vec4 FragColor;
 
 uniform float minDist;
 uniform float maxDist;
@@ -16,5 +16,5 @@ void main()
 
 
     // output msm
-    gl_FragData[0] = vec4(d, d*d, d*d*d, d*d*d*d);  
+    FragColor = vec4(d, d*d, d*d*d, d*d*d*d);  
 }

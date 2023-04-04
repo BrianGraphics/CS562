@@ -1,4 +1,4 @@
-#version 330
+#version 460
 
 out vec3 eyePos;
 

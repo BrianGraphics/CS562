@@ -35,6 +35,12 @@ enum ObjectIds {
 
 class Shader;
 
+// N: the number of pairs of point
+struct RND_Points {
+    float N;
+    unsigned int id;
+    std::vector<float> hammersley;
+};
 
 class Scene
 {
@@ -89,6 +95,7 @@ public:
     ShaderProgram* localLightsProgram;
     ShaderProgram* shadowProgram;
     ShaderProgram* computeProgram_v, *computeProgram_h;
+    ShaderProgram* preCalProgram, *irrProgram;
 
 
     // Options menu stuff
@@ -113,9 +120,17 @@ public:
     glm::vec3 centerPos;
     float centerRadius;
 
+    float Exposure;
+    Texture* irradianceMap, *skyTex;
+    bool specularOn;
+    RND_Points block;
+    FBO* coeffFBO;
+    FBO* irrFBO;
+
     void InitializeScene();
     void BuildTransforms();
+    void CalculateSH();
     void DrawMenu();
     void DrawScene();
-
+    ~Scene();
 };
