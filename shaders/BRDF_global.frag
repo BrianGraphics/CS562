@@ -44,6 +44,9 @@ float G1(float alpha, vec3 v, vec3 N);
 // Spherical  Harmonics
 uniform sampler2D SHCoeff;
 
+uniform sampler2D g_buffer_world_pos;
+uniform uint width, height;
+uniform float AO_scale, AO_contrast;
 
 vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
 {
@@ -54,74 +57,69 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
     alpha = 1.0f / sqrt((alpha + 2.0f) / 2.0f);
 
     N = normalize(N);
-    vec3 V = normalize(eyePos   - Pos);    
-    //vec3 H = normalize(L + V);  
-    //vec3 R = -1.0 * ( 2 * dot(V,N) * N - V);
-    //vec3 L = normalize(-R);   
+    vec3 V = normalize(eyePos   - Pos);
+    vec3 L = normalize(lightPos - Pos);  
+    vec3 H = normalize(L + V);
+    vec3 Ii = lightVal;
+    vec3 Ia = lightAmb;
     
-    // iradiance
-    vec2 irr_uv = vec2(atan(N.y,N.x)/(2*pi), -acos(N.z)/pi);
-    vec3 irr = textureLod(SHCoeff, irr_uv, 2).xyz;
-    
+
+    // Ambient Occlusion
+    vec3 Pi[9];
+    int num_points = 9;
+    float depth = distance(eyePos, Pos);
+    float influence = 1.0;
+
+    float x_p = gl_FragCoord.x, y_p = gl_FragCoord.y;
+    vec2 worldPos_uv = gl_FragCoord.xy / vec2(width, height);
+    float phi = (30.0 *  float(int(x_p) ^ int(y_p))) + 10.0 * x_p * y_p;
+
+    for(int i = 0; i < num_points; ++i) {
+        Pi[i] = vec3(0.0);
+        float a = (float(i) + 0.5) / float(num_points);
+        float h = a * influence / depth;
+        float theta = 2 * pi * a * (7.0 * float(num_points) / 9.0) + phi;
+
+        Pi[i] = texture2D(g_buffer_world_pos, worldPos_uv + h * vec2(cos(theta), sin(theta))).xyz;
+    }
+
+    float AO = 0.0;
+    float AO_S = 0.0;
+    float AO_threshhold = 0.001;
+    float falloff = 0.1 * influence;
+    for(int i = 0; i < num_points; ++i) {
+        vec3 dir = normalize(Pi[i] - Pos);
+        float di = distance(eyePos, Pi[i]); // depth of selected points
+        
+        float H_factor = 0.0;
+        if(influence >= length(dir)) H_factor = 1.0;
+        AO_S += max(0.0, dot(N, dir) - AO_threshhold * di) * H_factor / max(falloff * falloff, dot(dir, dir)); 
+    }
+    AO_S *= 2.0 * pi * falloff / float(num_points);
+    AO = max(0.0, 1.0 - pow(AO_scale * AO_S, AO_contrast));
+
+
 
 
     // SRGB -> linear
     Kd  = pow(Kd,  vec3(2.2));
     Ks  = pow(Ks,  vec3(2.2));
-    irr = pow(irr, vec3(2.2));
 
     // diffuse part
-    vec3 diffuse = Kd / pi * irr;
+    vec3 diffuse = Kd / pi;
 
     // specular part
-    vec3 specular;
-    for(int i = 0; i < max(pairs, 1); ++i) {
-        float rnd1 = hammersley[i * 2];
-        float rnd2 = hammersley[i * 2 + 1];
+    vec3  F_term = BRDF_F(Ks, L, H);
+    float D_term = BRDF_D(alpha, H, N);
+    float G_term = BRDF_G(alpha, L, V, N);
+    float LdotN = max(dot(L, N), 0.0), VdotN = dot(V, N);
+    vec3  specular =  F_term * G_term * D_term / (4 * LdotN * VdotN);
         
-        vec2 uv = vec2(rnd1, atan(alpha * sqrt(rnd2) / sqrt(1 - rnd2)) / pi);
-        vec3 L = vec3(cos(2*pi * (0.5 - uv.x)) * sin(pi * uv.y), sin(2*pi * (0.5 - uv.x)), cos(pi * uv.y));
-        vec3 R = 2 * dot(V,N) * N - V;
-
-        vec3 rA = normalize(vec3(-R.y, -R.x, 0.0));
-        vec3 rB = normalize(cross(R, rA));
-
-        L = normalize(L.x*rA + L.y*rB + L.z*R);
-        vec3 H = normalize(L + V);  
-
-        // sky dome
-        //vec2 sky_uv = vec2(0.5 - atan(L.y, L.x) / (2 * pi), acos(L.z) / pi);         
-        R = -R;
-        vec2 sky_uv = vec2(-atan(R.y,R.x)/(2*pi), acos(R.z)/pi);
-        float level = 0.5 * log2(skyWidth * skyHeight /pairs) - 0.5 * log2(BRDF_D(alpha, H, N) / 4.0);
-
-        vec3 Ii;
-        if(pairs == 0)
-            Ii = texture2D(skyTex, sky_uv).xyz;
-        else
-            Ii =  textureLod(skyTex, sky_uv, max(level, 0.0)).xyz;   
-
-        // SRGB -> linear
-        Ii  = pow(Ii,  vec3(2.2));
-
-
-        vec3  F_term = BRDF_F(Ks, L, H);
-        //float D_term = BRDF_D(alpha, H, N);
-        float G_term = BRDF_G(alpha, L, V, N);
-        float LdotN = max(dot(L, N), 0.0), VdotN = dot(V, N);
-        vec3  BRDF_part =  F_term * G_term / (4 * LdotN * VdotN);
-        //vec3  BRDF_part =  (F_term * G_term * D_term / (4 * LdotN * VdotN));
-
-        specular += Ii * LdotN * BRDF_part;
-    }
-
-    // avg
-    specular = specular / max(pairs, 1.0);
-
     if(!specularOn) specular = vec3(0.0);
 
     // diffuse + specular
-    vec3 result = diffuse + specular;
+    vec3 result =lightAmb * Kd + Ii * LdotN * ( diffuse + specular );
+    result *= AO;
 
     // linear -> SRGB
     result = exposure * result / (exposure * result + vec3(1.0));

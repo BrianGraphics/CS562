@@ -127,6 +127,10 @@ public:
     FBO* coeffFBO;
     FBO* irrFBO;
 
+    // AO
+    float AO_scale;
+    float AO_contrast;
+
     void InitializeScene();
     void BuildTransforms();
     void CalculateSH();

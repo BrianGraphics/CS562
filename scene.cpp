@@ -170,6 +170,10 @@ void Scene::InitializeScene()
     glGenBuffers(1, &block.id);
     CHECKERROR;
 
+    AO_contrast = 1.0f;
+    AO_scale = 1.0f;
+    CHECKERROR;
+
     objectRoot = new Object(NULL, nullId);
 
     // Create the lighting shader program from source code files.
@@ -430,6 +434,8 @@ void Scene::DrawMenu()
             ImGui::Checkbox("specular", &specularOn);
             ImGui::DragFloat("exposure", &Exposure, 0.1f, 0.0f, 10.0f, "%.1f");
             ImGui::DragFloat("Number of paris", &block.N, 1.0f, 0.0f, 100.0f);
+            ImGui::DragFloat("AO_scale", &AO_scale, 1.0f, 0.0f, 100.0f);
+            ImGui::DragFloat("AO_contrast", &AO_contrast, 1.0f, 0.0f, 100.0f);
             ImGui::EndMenu(); }
         
         ImGui::EndMainMenuBar(); }
@@ -856,6 +862,13 @@ void Scene::DrawScene()
     // for renderdoc to see the value
     loc = glGetUniformLocation(programId, "testblock");
     glUniform1fv(loc, block.hammersley.size(), &(block.hammersley[0]));
+    CHECKERROR;
+
+    loc = glGetUniformLocation(programId, "AO_scale");
+    glUniform1f(loc, AO_scale);
+    glUniform1f(loc, AO_scale);
+    loc = glGetUniformLocation(programId, "AO_contrast");
+    glUniform1f(loc, AO_contrast);
     CHECKERROR;
 
     //loc = glGetUniformLocation(programId, "SH");
