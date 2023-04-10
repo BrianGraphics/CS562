@@ -1,4 +1,4 @@
-////////////////////////////////////////////////////////////////////////
+﻿////////////////////////////////////////////////////////////////////////
 // The scene class contains all the parameters needed to define and
 // draw a simple scene, including:
 //   * Geometry
@@ -164,6 +164,7 @@ void Scene::InitializeScene()
     weights.assign(101, 0);
 
     specularOn = false;
+    Contrast = 1.0f;
     Exposure = 1.0f;
     block.N = 20.0;
     block.hammersley.assign(200, 0.0);
@@ -279,7 +280,7 @@ void Scene::InitializeScene()
     anim       = new Object(NULL, nullId);
     room = new Object(RoomPolygons, roomId, brickColor, black, 1); room->drawMe = false;
     floor      = new Object(FloorPolygons, floorId, floorColor, black, 200);
-    teapot     = new Object(TeapotPolygons, teapotId, glm::vec3(1.0f, 0.0, 0.0), brightSpec, 120.0);
+    teapot     = new Object(TeapotPolygons, teapotId, glm::vec3(1.0), brightSpec, 120.0);
     //teapot     = new Object(TeapotPolygons, teapotId, brassColor, brightSpec, 120);
     podium     = new Object(BoxPolygons, boxId, glm::vec3(woodColor), polishedSpec, 10); 
     sky        = new Object(SpherePolygons, skyId, glm::vec3(1.0, 0.0, 0.0), black, 0);
@@ -392,7 +393,7 @@ void Scene::InitializeScene()
     skyTex = new Texture("skys//Newport_Loft_Ref.hdr");
 
     irrFBO = new FBO();
-    irrFBO->CreateFBO(200, 100, 7);
+    irrFBO->CreateFBO(400, 200, 7);
 
     coeffFBO = new FBO();
     coeffFBO->CreateFBO(9, 1, 7);
@@ -428,7 +429,8 @@ void Scene::DrawMenu()
             ImGui::SliderInt("Toggle", &flipToggle, 0, 2);
 
             ImGui::Checkbox("specular", &specularOn);
-            ImGui::DragFloat("exposure", &Exposure, 0.1f, 0.0f, 10.0f, "%.1f");
+            ImGui::DragFloat("Contrast", &Contrast, 0.1f, 0.0f, 1000.0f, "%.1f");
+            ImGui::DragFloat("exposure", &Exposure, 0.1f, 0.0f, 1000.0f, "%.1f");
             ImGui::DragFloat("Number of paris", &block.N, 1.0f, 0.0f, 100.0f);
             ImGui::EndMenu(); }
         
@@ -474,34 +476,60 @@ void Scene::CalculateSH()
 {
     unsigned int programId, loc;
     preCalProgram->UseShader();
-    programId = irrProgram->programId;
+    programId = preCalProgram->programId;
 
-    loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(0, skyTex->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
-    glUniform1i(loc, 0);
+    // generate & bind a SSBO
+    unsigned int bindpoint = 1;
 
-    loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(1, coeffFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glUniform1i(loc, 1);
+    // 9 coeffs
+    ssbo.N = 9;
+    for (int i = 0; i < 9; ++i) ssbo.data.push_back(glm::vec4(0.0f));
+
+    glGenBuffers(1, &ssbo.id);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, bindpoint, ssbo.id);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, ssbo.N * sizeof(glm::vec4), ssbo.data.data(), GL_DYNAMIC_DRAW);
+    
+    // calculate coeffs
+    loc = glGetUniformLocation(programId, "skyImage");
+    glBindImageTexture(2, skyTex->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
+    glUniform1i(loc, 2);
 
     glDispatchCompute(1, 1, 1);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, bindpoint, 0);
 
     preCalProgram->UnuseShader();
+    CHECKERROR;
 
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo.id);
+    glm::vec4* read_data = (glm::vec4*) glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_READ_ONLY);
+    std::vector<glm::vec4> buffer_data(9);
+
+    for (int i = 0; i < 9; i++) {
+        uniSSBO.data.push_back(read_data[i]);
+    }
+    glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+
+    // draw irradiance map
     irrProgram->UseShader();
     programId = irrProgram->programId;
 
-    loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(2, coeffFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    bindpoint = 3;
+    glGenBuffers(1, &uniSSBO.id);
+    glBindBufferBase(GL_UNIFORM_BUFFER, bindpoint, uniSSBO.id);
+    glBufferData(GL_UNIFORM_BUFFER, 9 * sizeof(glm::vec4), uniSSBO.data.data(), GL_STATIC_DRAW);
 
-    loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(3, irrFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    loc = glGetUniformLocation(programId, "irrImage");
+    glBindImageTexture(4, irrFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 4);
 
     glDispatchCompute(irrFBO->width, irrFBO->height, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
+    glBindBufferBase(GL_UNIFORM_BUFFER, bindpoint, 0);
     irrProgram->UnuseShader();
+    CHECKERROR;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -795,10 +823,8 @@ void Scene::DrawScene()
     hFBO->BindTexture(5, programId, "msmH");
     vFBO->BindTexture(6, programId, "MSMap");
 
-    glActiveTexture(GL_TEXTURE10);
-    glBindTexture(GL_TEXTURE_2D, irradianceMap->textureId);
-    glActiveTexture(GL_TEXTURE11);
-    glBindTexture(GL_TEXTURE_2D, skyTex->textureId);
+    irradianceMap->BindTexture(10, programId, "irrMAp");
+    skyTex->BindTexture(11, programId, "skyTex");
     irrFBO->BindTexture(7, programId, "SHCoeff");
     CHECKERROR;
 
@@ -831,6 +857,8 @@ void Scene::DrawScene()
     glUniform1f(loc, maxDist);
     CHECKERROR;
 
+    loc = glGetUniformLocation(programId, "contrast");
+    glUniform1f(loc, Contrast);
     loc = glGetUniformLocation(programId, "exposure");
     glUniform1f(loc, Exposure);
 
@@ -857,10 +885,9 @@ void Scene::DrawScene()
     loc = glGetUniformLocation(programId, "testblock");
     glUniform1fv(loc, block.hammersley.size(), &(block.hammersley[0]));
     CHECKERROR;
-
-    //loc = glGetUniformLocation(programId, "SH");
-    //glBindImageTexture(7, irrFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    //glUniform1i(loc, 7);
+  
+    glBindImageTexture(3, coeffFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 3);
     CHECKERROR;
 
     screen->DrawVAO();

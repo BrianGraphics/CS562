@@ -2,17 +2,26 @@
 
 layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
-layout (rgba8  , binding = 0)   uniform readonly  image2D src;
-layout (rgba32f, binding = 1) uniform writeonly image2D dst;
+layout(std430, binding = 1) writeonly buffer shCoeffs
+{
+    vec4 coeffs[9];
+};
 
-float pi = 3.14159265359;
+layout (rgba8 , binding = 2) uniform readonly image2D skyImage;
 
-float GetBasis(int index, float theta, float phi);
-float EvalSH(vec3 N, int index);
+float pi = 3.14159;
+
+double GetBasis(int index, float theta, float phi);
+
+double Y0   = 0.5  * sqrt(1.0  / pi); // Y0
+double Y1   = 0.5  * sqrt(3.0  / pi); // Y1
+double Y2   = 0.5  * sqrt(15.0 / pi); // Y2_2, Y2_1, Y21
+double Y20  = 0.25 * sqrt(5.0  / pi); // Y20
+double Y22  = 0.25 * sqrt(15.0 / pi); // Y22
 
 void main()
 {        
-    ivec2 src_size = imageSize(src);
+    ivec2 src_size = imageSize(skyImage);
 
     float w = float(src_size.x);
     float h = float(src_size.y);
@@ -22,53 +31,53 @@ void main()
     float delta_phi   = 2.0 * pi / w;
 
     vec4 sum[9];
-    for(int i = 0; i < w; i++) {
-        for(int j = 0; j < h; j++) {
-            vec4 L = imageLoad(src, ivec2(i, j));            
+    for(int i = 0; i < 9; ++i) sum[i] = vec4(0.0);
+
+    for(int i = 0; i < src_size.x; i++) {
+        for(int j = 0; j < src_size.y; j++) {
+            vec4 L = imageLoad(skyImage, ivec2(i, j));
             L  = pow(L,  vec4(2.2));
 
             float theta = pi * (float(j) + 0.5) / h;
             float phi   = 2.0 * pi * (float(i) + 0.5) / w;
 
             for(int index = 0; index < 9; ++index) {
-                sum[index] += L * GetBasis(index, theta, phi) * sin(theta) * delta_theta * delta_phi;
+                sum[index] += L * float(GetBasis(index, theta, phi)) * sin(theta) * delta_theta * delta_phi;
             }
         }
     }
 
-    for(int index = 0; index < 9; ++index) {        
-        imageStore(dst, ivec2(index, 0), vec4(sum[index].xyz, 1.0));
+    for(int index = 0; index < 9; ++index) {                
+        coeffs[index] = sum[index];        
     }       
 }
 
-float GetBasis(int index, float theta, float phi) {                 
-    float Y0   = 0.28209479177f; // Y0
-    float Y1   = 0.4886025119f;  // Y1
-    float Y2   = 1.09254843059f; // Y2_2, Y2_1, Y21
-    float Y20  = 0.31539156525f; // Y20
-    float Y22  = 0.54627421529f; // Y22
+double GetBasis(int index, float theta, float phi) {                 
 
     float sinTheta = sin(theta);
     vec3 N = vec3(sinTheta * cos(phi), sinTheta * sin(phi), cos(theta));
     N = normalize(N);
+    double x = N.x;
+    double y = N.y;
+    double z = N.z;
 
     switch (index) {
         case 0:
             return Y0;            
         case 1:
-            return -Y1 * N.y;
+            return Y1 * y;
         case 2:
-            return Y1 * N.z;
+            return Y1 * z;
         case 3:
-            return -Y1 * N.x;
+            return Y1 * x;
         case 4:
-            return Y2 * N.x * N.y;
+            return Y2 * x * y;
         case 5:
-            return -Y2 * N.y * N.z;
+            return Y2 * y * z;
         case 6:
-            return Y20 * (3.0 * N.z * N.z - 1.0);
+            return Y20 * (3.0 * z * z - 1.0);
         case 7:
-            return -Y2 * N.x * N.z;
+            return Y2 * x * z;
         case 8:
             return Y22 * (N.x * N.x - N.y * N.y);
     }

@@ -42,6 +42,12 @@ struct RND_Points {
     std::vector<float> hammersley;
 };
 
+struct SSBO {
+    int N;
+    unsigned int id;
+    std::vector<glm::vec4> data;
+};
+
 class Scene
 {
 public:
@@ -120,12 +126,15 @@ public:
     glm::vec3 centerPos;
     float centerRadius;
 
+    float Contrast;
     float Exposure;
     Texture* irradianceMap, *skyTex;
     bool specularOn;
     RND_Points block;
     FBO* coeffFBO;
     FBO* irrFBO;
+    SSBO ssbo;
+    SSBO uniSSBO;
 
     void InitializeScene();
     void BuildTransforms();
