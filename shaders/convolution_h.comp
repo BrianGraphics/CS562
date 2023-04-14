@@ -2,25 +2,55 @@
 
 layout (local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 uniform int w;
+
+// Gaussian Weights
 uniform blurKernel { float weights[101]; };
 
-layout (rgba32f) uniform readonly  image2D src;
+layout (rgba32f) uniform readonly image2D src;
 layout (rgba32f) uniform writeonly image2D dst;
 
-shared vec4 h[128+101];
+layout (rgba32f) uniform readonly  image2D pos;
+layout (rgba32f) uniform readonly  image2D normal;
+
+shared float AO[128 + 101];
+shared vec3  N[128 + 101];
+shared float d[128 + 101];
+
+float pi = 3.14159;
+float pi2 = 2*pi;
+float sigma = 0.01;
 
 void main()
 {
   ivec2 gpos = ivec2(gl_GlobalInvocationID.xy);
   uint i = gl_LocalInvocationID.x;
-  h[i] = imageLoad(src, gpos + ivec2(-w, 0));
-  if (i<2*w + 1) h[i+128] = imageLoad(src, gpos + ivec2(128 - w, 0));
+
+  AO[i] = imageLoad(src, gpos + ivec2(-w, 0)).w;
+  N[i]  = normalize(imageLoad(normal, gpos + ivec2(-w, 0)).xyz);
+  d[i]  = imageLoad(pos, gpos + ivec2(-w, 0)).w;
+  
+  if (i<2*w + 1) {
+    AO[i + 128] = imageLoad(src, gpos + ivec2(128 - w, 0)).w;
+    N[i  + 128] = normalize(imageLoad(normal, gpos + ivec2(128 - w, 0)).xyz);
+    d[i  + 128] = imageLoad(pos, gpos + ivec2(128 - w, 0)).w;
+  }
   barrier();
   
-  vec4 sum = vec4(0.0);
+  vec3  center_N = N[w];
+  float center_d = d[w];
+
+  float sum = 0.0;
+  float total_weight = 0.0;
   for(uint index = 0; index <= 2*w; index++) {
-    sum += weights[index] * h[index + i];
+    float weight = max(dot(N[index], center_N), 0.0) 
+                       * (1.0 / sqrt(pi2 * sigma))
+                       * exp(-(d[index] - center_d) * (d[index] - center_d) / (2.0 * sigma)) 
+                       * weights[index];
+    //weight = 1.0;
+    total_weight += weight; 
+    sum += weight * AO[i + index];
   }
-  
-  imageStore(dst, gpos, sum);        
+
+  sum /= total_weight;
+  imageStore(dst, gpos, vec4(imageLoad(src, gpos).xyz, sum));        
 }

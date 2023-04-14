@@ -95,8 +95,7 @@ public:
     ShaderProgram* localLightsProgram;
     ShaderProgram* shadowProgram;
     ShaderProgram* computeProgram_v, *computeProgram_h;
-    ShaderProgram* preCalProgram, *irrProgram;
-
+    ShaderProgram* bilateralProgram;
 
     // Options menu stuff
     bool show_demo_window;
@@ -124,16 +123,14 @@ public:
     Texture* irradianceMap, *skyTex;
     bool specularOn;
     RND_Points block;
-    FBO* coeffFBO;
-    FBO* irrFBO;
 
     // AO
     float AO_scale;
     float AO_contrast;
+    FBO* aoFBO;
 
     void InitializeScene();
     void BuildTransforms();
-    void CalculateSH();
     void DrawMenu();
     void DrawScene();
     ~Scene();

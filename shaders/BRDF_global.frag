@@ -3,7 +3,7 @@
 out vec4 FragColor;
 
 float pi = 3.14159;
-float pi2 = 2*pi;
+float pi2 = 2.0*pi;
 
 in vec3 eyePos;
 
@@ -12,25 +12,8 @@ uniform vec3  lightPos;
 uniform vec3  lightVal;
 uniform vec3  lightAmb;
 
-// for shadow
-uniform sampler2D shadowMap;
-uniform sampler2D msmH;
-uniform sampler2D MSMap;
-uniform mat4 ShadowMatrix;
-
-uniform float minDist;
-uniform float maxDist;
-
 uniform float exposure;
-uniform sampler2D irrMap;
 uniform sampler2D skyTex;
-uniform float skyWidth, skyHeight;
-
-uniform HammersleyBlock {
- float pairs;
- uint id;
- float hammersley[2*100]; 
-};
 
 uniform bool specularOn;
 uniform float testblock[2*100];
@@ -41,17 +24,14 @@ float BRDF_D(float alpha, vec3 H, vec3 N);
 float BRDF_G(float alpha, vec3 L, vec3 V, vec3 N);
 float G1(float alpha, vec3 v, vec3 N);
 
-// Spherical  Harmonics
-uniform sampler2D SHCoeff;
-
 uniform sampler2D g_buffer_world_pos;
 uniform uint width, height;
 uniform float AO_scale, AO_contrast;
 
-vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
+vec4 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
 {
     // isSky
-    if(alpha == 6969) return Kd;
+    if(alpha == 6969) return vec4(Kd, 1.0);
 
     // GGX alpha
     alpha = 1.0f / sqrt((alpha + 2.0f) / 2.0f);
@@ -66,12 +46,14 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
 
     // Ambient Occlusion
     vec3 Pi[9];
+    vec2 Pi_uv[9];
     int num_points = 9;
-    float depth = distance(eyePos, Pos);
-    float influence = 1.0;
+    float influence = 5.0;
 
     float x_p = gl_FragCoord.x, y_p = gl_FragCoord.y;
     vec2 worldPos_uv = gl_FragCoord.xy / vec2(width, height);
+    float depth = texture2D(g_buffer_world_pos, worldPos_uv).w;
+
     float phi = (30.0 *  float(int(x_p) ^ int(y_p))) + 10.0 * x_p * y_p;
 
     for(int i = 0; i < num_points; ++i) {
@@ -80,7 +62,8 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
         float h = a * influence / depth;
         float theta = 2 * pi * a * (7.0 * float(num_points) / 9.0) + phi;
 
-        Pi[i] = texture2D(g_buffer_world_pos, worldPos_uv + h * vec2(cos(theta), sin(theta))).xyz;
+        Pi_uv[i] = worldPos_uv + h * vec2(cos(theta), sin(theta));
+        Pi[i] = texture2D(g_buffer_world_pos, Pi_uv[i]).xyz;
     }
 
     float AO = 0.0;
@@ -89,16 +72,15 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
     float falloff = 0.1 * influence;
     for(int i = 0; i < num_points; ++i) {
         vec3 dir = normalize(Pi[i] - Pos);
-        float di = distance(eyePos, Pi[i]); // depth of selected points
+        float di = texture2D(g_buffer_world_pos, Pi_uv[i]).w; // depth of selected points
         
         float H_factor = 0.0;
-        if(influence >= length(dir)) H_factor = 1.0;
+        if(influence > abs(di - depth)) H_factor = 1.0;
         AO_S += max(0.0, dot(N, dir) - AO_threshhold * di) * H_factor / max(falloff * falloff, dot(dir, dir)); 
     }
-    AO_S *= 2.0 * pi * falloff / float(num_points);
-    AO = max(0.0, 1.0 - pow(AO_scale * AO_S, AO_contrast));
 
-
+    AO_S *= pi2 * falloff / float(num_points);
+    AO = max(0.0, pow(1.0 - AO_scale * AO_S, AO_contrast));
 
 
     // SRGB -> linear
@@ -119,13 +101,11 @@ vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha)
 
     // diffuse + specular
     vec3 result =lightAmb * Kd + Ii * LdotN * ( diffuse + specular );
-    result *= AO;
 
     // linear -> SRGB
-    result = exposure * result / (exposure * result + vec3(1.0));
     result = pow(result, vec3(1.0/2.2));
     
-    return result;
+    return vec4(result, AO);
 }
 
 vec3 BRDF_F(vec3 Ks, vec3 L, vec3 H) 

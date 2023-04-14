@@ -13,8 +13,8 @@ uniform uint width, height;
 // config
 uniform int ID;
 uniform int Toggle;
-uniform vec3  lightAmb;
-vec3 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha);
+
+vec4 BRDF(vec3 Pos, vec3 N, vec3 Kd, vec3 Ks, float alpha);
 
 void main()
 {
@@ -45,5 +45,5 @@ void main()
         return;
     }
        
-    FragColor.xyz = BRDF(WorldPos_d.xyz, Normal_d.xyz, Kd_d.xyz, Ks_d.xyz, Ks_d.w);            
+    FragColor = BRDF(WorldPos_d.xyz, Normal_d.xyz, Kd_d.xyz, Ks_d.xyz, Ks_d.w);  
 }

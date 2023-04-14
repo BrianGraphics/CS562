@@ -1,6 +1,6 @@
-#version 330
+#version 330 core
 
-out vec4 FragColor[];
+out vec4 FragColor[4];
 
 in vec3 normalVec;
 in vec4 worldPos;
@@ -17,7 +17,8 @@ uniform sampler2D skyTex;
 
 void main()
 {
-    FragColor[0]     = worldPos;
+    float dis = distance((WorldInverse * vec4(0, 0, 0, 1)).xyz, worldPos.xyz);
+    FragColor[0]     = vec4(worldPos.xyz, dis);
     FragColor[1].xyz = normalVec;
     FragColor[2].xyz = diffuse;
     FragColor[3]     = vec4(specular, shininess);

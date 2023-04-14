@@ -229,13 +229,12 @@ void Scene::InitializeScene()
     computeShader_v = new ComputeShader();
     computeShader_v->SetShader(computeProgram_v);
 
-    preCalProgram = new ShaderProgram();
-    preCalProgram->AddShader("shaders\\preCalculation.comp", GL_COMPUTE_SHADER);
-    preCalProgram->LinkProgram();
-
-    irrProgram = new ShaderProgram();
-    irrProgram->AddShader("shaders\\irradiance.comp", GL_COMPUTE_SHADER);
-    irrProgram->LinkProgram();
+    bilateralProgram = new ShaderProgram();
+    bilateralProgram->AddShader("shaders\\Bilateral.vert", GL_VERTEX_SHADER);
+    bilateralProgram->AddShader("shaders\\Bilateral.frag", GL_FRAGMENT_SHADER);
+    
+    glBindAttribLocation(bilateralProgram->programId, 0, "vertex");
+    bilateralProgram->LinkProgram();
     CHECKERROR;
     
     // Create all the Polygon shapes
@@ -382,24 +381,22 @@ void Scene::InitializeScene()
     CHECKERROR;
 
     hFBO = new FBO();
-    hFBO->CreateFBO(1280, 1280, 5);
+    hFBO->CreateFBO(768, 768, 5);
     CHECKERROR;
 
     vFBO = new FBO();
-    vFBO->CreateFBO(1280, 1280, 6);
+    vFBO->CreateFBO(768, 768, 6);
+    CHECKERROR;
+
+    aoFBO = new FBO();
+    aoFBO->CreateFBO(768, 768, 7);
     CHECKERROR;
 
     // compute shader stuff
-    blur_size = 4;
+    blur_size = 1;
 
     irradianceMap = new Texture("skys//Newport_Loft_Ref.irr.hdr");
     skyTex = new Texture("skys//Newport_Loft_Ref.hdr");
-
-    irrFBO = new FBO();
-    irrFBO->CreateFBO(200, 100, 7);
-
-    coeffFBO = new FBO();
-    coeffFBO->CreateFBO(9, 1, 7);
     CHECKERROR;
 }
 
@@ -436,6 +433,9 @@ void Scene::DrawMenu()
             ImGui::DragFloat("Number of paris", &block.N, 1.0f, 0.0f, 100.0f);
             ImGui::DragFloat("AO_scale", &AO_scale, 1.0f, 0.0f, 100.0f);
             ImGui::DragFloat("AO_contrast", &AO_contrast, 1.0f, 0.0f, 100.0f);
+
+            
+            ImGui::DragInt("Blur Size", &blur_size, 1.0f, 0, 50);
             ImGui::EndMenu(); }
         
         ImGui::EndMainMenuBar(); }
@@ -474,40 +474,6 @@ void Scene::BuildTransforms()
     // comparison with the project document.
     //std::cout << "WorldView: " << glm::to_string(WorldView) << std::endl;
     //std::cout << "WorldProj: " << glm::to_string(WorldProj) << std::endl;
-}
-
-void Scene::CalculateSH()
-{
-    unsigned int programId, loc;
-    preCalProgram->UseShader();
-    programId = irrProgram->programId;
-
-    loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(0, skyTex->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8);
-    glUniform1i(loc, 0);
-
-    loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(1, coeffFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-    glUniform1i(loc, 1);
-
-    glDispatchCompute(1, 1, 1);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-    preCalProgram->UnuseShader();
-
-    irrProgram->UseShader();
-    programId = irrProgram->programId;
-
-    loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(2, coeffFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-
-    loc = glGetUniformLocation(programId, "dst");
-    glBindImageTexture(3, irrFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
-
-    glDispatchCompute(irrFBO->width, irrFBO->height, 1);
-    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-    irrProgram->UnuseShader();
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -613,59 +579,100 @@ void Scene::DrawScene()
     gbufferProgram->UnuseShader();
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // Shadow pass
+    // lighting pass 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    shadowProgram->UseShader();
-    programId = shadowProgram->programId;
+    // Enable & Disable
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    CHECKERROR;
 
-    shadowFBO->BindFBO();
+    // Choose Shader
+    lightingProgram->UseShader();
+    programId = lightingProgram->programId;
+
+    aoFBO->BindFBO();
+    CHECKERROR;
 
     // Set the viewport, and clear the screen
-    glViewport(0, 0, shadowFBO->width, shadowFBO->height);
+    glViewport(0, 0, width, height);
     glClearColor(0.5, 0.5, 0.5, 1.0);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    loc = glGetUniformLocation(programId, "ViewMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ViewMatrix));
-    loc = glGetUniformLocation(programId, "ProjectionMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ProjectionMatrix));
-    loc = glGetUniformLocation(programId, "minDist");
-    glUniform1f(loc, minDist);
-    loc = glGetUniformLocation(programId, "maxDist");
-    glUniform1f(loc, maxDist);
     CHECKERROR;
 
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_FRONT);
+    // bind texture
+    G_Buffer->BindTexture( 0, programId, "g_buffer_world_pos");
+    G_Buffer->BindTexture( 1, programId, "g_buffer_world_norm");
+    G_Buffer->BindTexture( 2, programId, "g_buffer_diffuse_color");
+    G_Buffer->BindTexture( 3, programId, "g_buffer_specular_color");
 
-    // Draw all objects (This recursively traverses the object hierarchy.)
-    objectRoot->Draw(shadowProgram, Identity);
+    skyTex->BindTexture(11, programId, "skyTex");
     CHECKERROR;
 
-    glDisable(GL_CULL_FACE);
+    // for BRDF
+    loc = glGetUniformLocation(programId, "WorldInverse");
+    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
+    loc = glGetUniformLocation(programId, "lightPos");
+    glUniform3fv(loc, 1, &(lightPos[0]));
+    loc = glGetUniformLocation(programId, "lightVal");
+    glUniform3fv(loc, 1, &(lightVal[0]));
+    loc = glGetUniformLocation(programId, "lightAmb");
+    glUniform3fv(loc, 1, &(lightAmb[0]));
 
-    //Unbind FBO
-    shadowFBO->UnbindFBO();
+    loc = glGetUniformLocation(programId, "width");
+    glUniform1ui(loc, width);
+    loc = glGetUniformLocation(programId, "height");
+    glUniform1ui(loc, height);
+    loc = glGetUniformLocation(programId, "ID");
+    glUniform1i(loc, drawID);
+    loc = glGetUniformLocation(programId, "Toggle");
+    glUniform1i(loc, flipToggle);
+    CHECKERROR;
+
+    loc = glGetUniformLocation(programId, "exposure");
+    glUniform1f(loc, Exposure);
+
+    // skydome texture
+    loc = glGetUniformLocation(programId, "skyTex");
+    glUniform1i(loc, 11);
+    CHECKERROR;
+
+    loc = glGetUniformLocation(programId, "AO_scale");
+    glUniform1f(loc, AO_scale);
+    loc = glGetUniformLocation(programId, "AO_contrast");
+    glUniform1f(loc, AO_contrast);
+    CHECKERROR;
+
+    screen->DrawVAO();
+    CHECKERROR;
+
+    // unbind textures
+    G_Buffer->UnbindTexture(0);
+    G_Buffer->UnbindTexture(1);
+    G_Buffer->UnbindTexture(2);
+    G_Buffer->UnbindTexture(3);
+    skyTex->UnbindTexture(11);    
+    CHECKERROR;
+
+    aoFBO->UnbindFBO();
 
     // Turn off the shader
-    shadowProgram->UnuseShader();
-
-
+    lightingProgram->UnuseShader();
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // compute shader pass horizontal
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// bilateral filter pass horizontal
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // calculate weight for shadow blur
-    
+// calculate Gaussian weights for blur
     float sum = 0.0f;
     if (blur_size == 0) {
         weights[0] = 1.0;
     }
     else {
         for (int i = -blur_size; i <= blur_size; ++i) {
-            float s = (float)blur_size / 2.0;            
+            float s = (float)blur_size / 2.0;
             weights[i + blur_size] = powf(glm::e<float>(), -0.5 * ((float)i / s) * ((float)i / s));
             sum += weights[i + blur_size];
         }
@@ -675,65 +682,55 @@ void Scene::DrawScene()
     }
 
     unsigned int bindPoint = 0;
-    unsigned int blockID   = 0;
+    unsigned int blockID = 0;
 
     computeProgram_h->UseShader();
     programId = computeProgram_h->programId;
 
-    // bind fbo
-    shadowFBO->BindTexture(4, programId, "shadowMap");
-    hFBO->BindTexture(5, programId, "msmH");
-
-    bindPoint = computeShader_v->GetBindPoint();
+    // bind Gaussian weights
+    bindPoint = computeShader_h->GetBindPoint();
     blockID = computeShader_h->GetBlockID();
 
-    loc = glGetUniformBlockIndex(programId, "blurKernel");
-    glUniformBlockBinding(programId, loc, bindPoint);
-
-    glBindBuffer(GL_UNIFORM_BUFFER, blockID);
     glBindBufferBase(GL_UNIFORM_BUFFER, bindPoint, blockID);
 
-    glBufferData(GL_UNIFORM_BUFFER, (2*blur_size + 1) * sizeof(float), weights.data(), GL_STATIC_DRAW);
+    glBufferData(GL_UNIFORM_BUFFER, (2 * blur_size + 1) * sizeof(float), weights.data(), GL_STATIC_DRAW);
 
     loc = glGetUniformLocation(programId, "w");
     glUniform1i(loc, blur_size);
 
     loc = glGetUniformLocation(programId, "src");
-    glBindImageTexture(0, shadowFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glBindImageTexture(0, aoFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
     glUniform1i(loc, 0);
 
     loc = glGetUniformLocation(programId, "dst");
     glBindImageTexture(1, hFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(loc, 1);
 
-    glDispatchCompute(shadowFBO->width / 128, shadowFBO->height, 1);
+    loc = glGetUniformLocation(programId, "pos");
+    glBindImageTexture(2, G_Buffer->posID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 2);
+
+    loc = glGetUniformLocation(programId, "normal");
+    glBindImageTexture(3, G_Buffer->normalID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 3);
+
+    glDispatchCompute(width / 128, height, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
-    //unbind fbo
-    shadowFBO->UnbindFBO();
-    hFBO->UnbindFBO();
     computeProgram_h->UnuseShader();
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // compute shader pass vertical
+    // bilateral filter pass horizontal
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     computeProgram_v->UseShader();
-    programId = computeProgram_h->programId;
-    
-    // bind fbo
-    hFBO->BindTexture(5, programId, "msmH");
-    vFBO->BindTexture(6, programId, "msmV");
+    programId = computeProgram_v->programId;
 
-    bindPoint = computeShader_h->GetBindPoint();
-    blockID = computeShader_h->GetBlockID();
+    // bind Gaussian weights
+    bindPoint = computeShader_v->GetBindPoint();
+    blockID = computeShader_v->GetBlockID();
 
-    loc = glGetUniformBlockIndex(programId, "blurKernel");
-    glUniformBlockBinding(programId, loc, bindPoint);
-
-    glBindBuffer(GL_UNIFORM_BUFFER, blockID);
     glBindBufferBase(GL_UNIFORM_BUFFER, bindPoint, blockID);
-
     glBufferData(GL_UNIFORM_BUFFER, (2 * blur_size + 1) * sizeof(float), weights.data(), GL_STATIC_DRAW);
 
     loc = glGetUniformLocation(programId, "w");
@@ -747,34 +744,20 @@ void Scene::DrawScene()
     glBindImageTexture(1, vFBO->textureId, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
     glUniform1i(loc, 1);
 
-    glDispatchCompute(vFBO->width, vFBO->height / 128, 1);
+    loc = glGetUniformLocation(programId, "pos");
+    glBindImageTexture(2, G_Buffer->posID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 2);
+
+    loc = glGetUniformLocation(programId, "normal");
+    glBindImageTexture(3, G_Buffer->normalID, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
+    glUniform1i(loc, 3);
+
+    glDispatchCompute(width, height / 128, 1);
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
-    //unbind fbo
-    hFBO->UnbindFBO();
-    vFBO->UnbindFBO();    
     computeProgram_v->UnuseShader();
 
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    // lighting pass 
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    // build block for Monte Carlo
-    int pos = 0;
-    int num_pairs = static_cast<int>(block.N);
-    for (int k = 0; k < num_pairs; ++k) {
-        float p = 0.5f;
-        float u = 0.0f;
-        for (int kk = k; kk; p *= 0.5f, kk >>= 1) {
-            if (kk & 1)
-                u += p;
-        }
-
-        float v = (k + 0.5) / num_pairs;
-        block.hammersley[pos++] = u;
-        block.hammersley[pos++] = v;
-    }
-
+    // final
     // Enable & Disable
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
@@ -783,8 +766,10 @@ void Scene::DrawScene()
     CHECKERROR;
 
     // Choose Shader
-    lightingProgram->UseShader();
-    programId = lightingProgram->programId;
+    bilateralProgram->UseShader();
+    programId = bilateralProgram->programId;
+
+    vFBO->BindTexture(5, programId, "blurredAO");
 
     // Set the viewport, and clear the screen
     glViewport(0, 0, width, height);
@@ -792,107 +777,16 @@ void Scene::DrawScene()
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     CHECKERROR;
 
-    // bind texture
-    G_Buffer->BindTexture( 0, programId, "g_buffer_world_pos");
-    G_Buffer->BindTexture( 1, programId, "g_buffer_world_norm");
-    G_Buffer->BindTexture( 2, programId, "g_buffer_diffuse_color");
-    G_Buffer->BindTexture( 3, programId, "g_buffer_specular_color");
-    shadowFBO->BindTexture(4, programId, "shadowMap");
-    hFBO->BindTexture(5, programId, "msmH");
-    vFBO->BindTexture(6, programId, "MSMap");
-
-    glActiveTexture(GL_TEXTURE10);
-    glBindTexture(GL_TEXTURE_2D, irradianceMap->textureId);
-    glActiveTexture(GL_TEXTURE11);
-    glBindTexture(GL_TEXTURE_2D, skyTex->textureId);
-    irrFBO->BindTexture(7, programId, "SHCoeff");
-    CHECKERROR;
-
-    // for BRDF
-    loc = glGetUniformLocation(programId, "WorldInverse");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(WorldInverse));
-    loc = glGetUniformLocation(programId, "lightPos");
-    glUniform3fv(loc, 1, &(lightPos[0]));
-    loc = glGetUniformLocation(programId, "lightVal");
-    glUniform3fv(loc, 1, &(lightVal[0]));
-    loc = glGetUniformLocation(programId, "lightAmb");
-    glUniform3fv(loc, 1, &(lightAmb[0]));
-
-    // for final output
     loc = glGetUniformLocation(programId, "width");
-    glUniform1ui(loc, width);
+    glUniform1f(loc, static_cast<float>(width));
     loc = glGetUniformLocation(programId, "height");
-    glUniform1ui(loc, height);
-    loc = glGetUniformLocation(programId, "ID");
-    glUniform1i(loc, drawID);
-    loc = glGetUniformLocation(programId, "Toggle");
-    glUniform1i(loc, flipToggle);
-    loc = glGetUniformLocation(programId, "ShadowMatrix");
-    glUniformMatrix4fv(loc, 1, GL_FALSE, Pntr(ShadowMatrix));
-    CHECKERROR;
-
-    loc = glGetUniformLocation(programId, "minDist");
-    glUniform1f(loc, minDist);
-    loc = glGetUniformLocation(programId, "maxDist");
-    glUniform1f(loc, maxDist);
-    CHECKERROR;
-
-    loc = glGetUniformLocation(programId, "exposure");
-    glUniform1f(loc, Exposure);
-
-    // irradiance map & skydome texture
-    loc = glGetUniformLocation(programId, "irrMap");
-    glUniform1i(loc, 10);
-    loc = glGetUniformLocation(programId, "skyTex");
-    glUniform1i(loc, 11);
-    loc = glGetUniformLocation(programId, "skyWidth");
-    glUniform1f(loc, static_cast<float>(skyTex->width));
-    loc = glGetUniformLocation(programId, "skyHeight");
-    glUniform1f(loc, static_cast<float>(skyTex->height));
-
-    // for random points
-    unsigned int bindpoint = 1; 
-    glBindBufferBase(GL_UNIFORM_BUFFER, bindpoint, block.id);
-    glBufferData(GL_UNIFORM_BUFFER, sizeof(block), &block, GL_STATIC_DRAW);
-    loc = glGetUniformBlockIndex(programId, "HammersleyBlock");
-    glUniformBlockBinding(programId, loc, bindpoint);
-    loc = glGetUniformLocation(programId, "specularOn");
-    glUniform1ui(loc, specularOn);
-
-    // for renderdoc to see the value
-    loc = glGetUniformLocation(programId, "testblock");
-    glUniform1fv(loc, block.hammersley.size(), &(block.hammersley[0]));
-    CHECKERROR;
-
-    loc = glGetUniformLocation(programId, "AO_scale");
-    glUniform1f(loc, AO_scale);
-    glUniform1f(loc, AO_scale);
-    loc = glGetUniformLocation(programId, "AO_contrast");
-    glUniform1f(loc, AO_contrast);
-    CHECKERROR;
-
-    //loc = glGetUniformLocation(programId, "SH");
-    //glBindImageTexture(7, irrFBO->textureId, 0, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F);
-    //glUniform1i(loc, 7);
+    glUniform1f(loc, static_cast<float>(height));
     CHECKERROR;
 
     screen->DrawVAO();
     CHECKERROR;
 
-    // unbind textures
-    G_Buffer->UnbindTexture(0);
-    G_Buffer->UnbindTexture(1);
-    G_Buffer->UnbindTexture(2);
-    G_Buffer->UnbindTexture(3);
-    shadowFBO->UnbindTexture(4);
-    hFBO->UnbindTexture(5);
-    vFBO->UnbindTexture(6);
-    irrFBO->UnbindTexture(7);
-    
-    irradianceMap->UnbindTexture(10);
-    skyTex->UnbindTexture(11);    
-    CHECKERROR;
+    vFBO->UnbindTexture(5);
 
-    // Turn off the shader
-    lightingProgram->UnuseShader();
+    bilateralProgram->UnuseShader();
 }

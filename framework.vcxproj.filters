@@ -77,5 +77,11 @@
     </None>
     <None Include="shaders\irradiance.comp" />
     <None Include="shaders\preCalculation.comp" />
+    <None Include="shaders\Bilateral.frag">
+      <Filter>Shaders</Filter>
+    </None>
+    <None Include="shaders\Bilateral.vert">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
 </Project>

@@ -138,6 +138,8 @@
     <ClInclude Include="ComputeShader.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="shaders\Bilateral.frag" />
+    <None Include="shaders\Bilateral.vert" />
     <None Include="shaders\BRDF_global.frag" />
     <None Include="shaders\BRDF_global.vert" />
     <None Include="shaders\BRDF_local.frag" />

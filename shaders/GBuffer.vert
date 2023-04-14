@@ -1,11 +1,12 @@
-#version 460
+#version 330 core
 
+ 
 uniform mat4 WorldView, WorldInverse, WorldProj, ModelTr, NormalTr;
 
-in vec4 vertex;
-in vec3 vertexNormal;
-in vec2 vertexTexture;
-in vec3 vertexTangent;
+layout (location = 0) in vec4 vertex;
+layout (location = 1) in vec3 vertexNormal;
+layout (location = 2) in vec2 vertexTexture;
+layout (location = 3) in vec3 vertexTangent;
 
 out vec3 normalVec;
 out vec4 worldPos;
