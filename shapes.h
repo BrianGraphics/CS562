@@ -142,4 +142,15 @@ public:
     Screen();
 };
 
+class Mesh : public Shape
+{
+private:
+    GLuint Pbuff;
+    GLuint Ibuff;
+public:
+    Mesh();
+    void UpdateMesh(std::vector<glm::vec4> points, float const& width, float const& height, glm::mat4 inverse);
+    void makeMeshVAO();
+};
+
 #endif

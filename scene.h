@@ -42,6 +42,12 @@ struct RND_Points {
     std::vector<float> hammersley;
 };
 
+struct SSBO {
+    int N;
+    unsigned int id;
+    std::vector<glm::vec4> depthData;
+};
+
 class Scene
 {
 public:
@@ -95,7 +101,7 @@ public:
     ShaderProgram* localLightsProgram;
     ShaderProgram* shadowProgram;
     ShaderProgram* computeProgram_v, *computeProgram_h;
-    ShaderProgram* bilateralProgram;
+    ShaderProgram* readDepthProgram;
 
     // Options menu stuff
     bool show_demo_window;
@@ -128,6 +134,12 @@ public:
     float AO_scale;
     float AO_contrast;
     FBO* aoFBO;
+
+    // ssbo for depth
+    SSBO ssbo;
+    std::vector<float> depthMeshData;
+    Mesh* lightMesh;
+    Object* GodsRay;
 
     void InitializeScene();
     void BuildTransforms();

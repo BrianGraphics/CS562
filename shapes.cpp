@@ -785,3 +785,71 @@ Screen::Screen()
     ComputeSize();
     MakeVAO();
 }
+
+Mesh::Mesh() {
+    diffuseColor  = glm::vec3(0.0);
+    specularColor = glm::vec3(0.0);
+    shininess = 1.0;
+
+    glGenVertexArrays(1, &vaoID);
+    glGenBuffers(1, &Pbuff);
+    glGenBuffers(1, &Ibuff);
+}
+
+void Mesh::UpdateMesh(std::vector<glm::vec4> points, float const& width, float const& height, glm::mat4 inverse) {
+    int index = 0;
+    Pnt.clear();
+    Tri.clear();
+
+    for (int j = 0; j < height; ++j) {
+        for (int i = 0; i < width; ++i) {
+            glm::vec4 point = points[index];            
+            Pnt.push_back(inverse * point);
+            index++;
+        }
+    }
+
+    Pnt.push_back(inverse * glm::vec4(0.0, 0.0, 0.0, 1.0));
+
+    for (int j = 0; j < height - 1; ++j) {
+        for (int i = 0; i < width - 1; ++i) {
+
+            // update index
+            int triIndex = i + j * width;
+
+            //            top left  top right     bot right             bot left
+            pushquad(Tri, triIndex, triIndex + 1, triIndex + width + 1, triIndex + width);
+        }
+    }
+
+    // push triangles from edge points to lightPos
+    int light_point_index = Pnt.size() - 1;
+    int bot_left_index = width * (height - 1);
+    for (int i = 0; i < width - 1; ++i) {
+        Tri.push_back(glm::ivec3(i, i + 1, light_point_index));                                                   // top left, top right
+        Tri.push_back(glm::ivec3(bot_left_index + i, bot_left_index + i + 1, light_point_index));                 // bot left, bot right
+    }                                                                                                             
+                                                                                                                  
+    for (int j = 0; j < height - 1; ++j) {                                                                        
+        Tri.push_back(glm::ivec3(j * width, (j + 1) * width, light_point_index));                                 // top left, bot left
+        Tri.push_back(glm::ivec3((j * width) + (width - 1), ((j + 1) * width) + (width - 1), light_point_index)); // top right, bot right
+    }
+
+    count = Tri.size();
+    makeMeshVAO();
+}
+
+void Mesh::makeMeshVAO() {
+    glBindVertexArray(vaoID);
+
+    glBindBuffer(GL_ARRAY_BUFFER, Pbuff);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * Pnt.size(),
+        &Pnt[0][0], GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+    glGenBuffers(1, &Ibuff);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Ibuff);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(int) * 3 * Tri.size(),
+        &Tri[0][0], GL_STATIC_DRAW);
+}

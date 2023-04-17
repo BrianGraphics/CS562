@@ -15,6 +15,8 @@ void main()
     if(d < 0.0) d = 0.0;
 
 
-    // output msm
-    FragColor = vec4(d, d*d, d*d*d, d*d*d*d);  
+    // output
+    //FragColor = vec4(d, 0.0, 0.0, 0.0);  
+    FragColor = position;
+    
 }

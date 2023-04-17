@@ -154,6 +154,7 @@
     <None Include="shaders\LocalLights.frag" />
     <None Include="shaders\LocalLights.vert" />
     <None Include="shaders\preCalculation.comp" />
+    <None Include="shaders\readDepth.comp" />
     <None Include="shaders\shadow.frag" />
     <None Include="shaders\shadow.vert" />
   </ItemGroup>
